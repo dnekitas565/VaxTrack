@@ -1,0 +1,20 @@
+flowchart LR
+  subgraph Browser
+    UI["React 18 + Vite<br/>Tailwind, TanStack Query"]
+  end
+  subgraph Node["Node.js 20+ / Express API"]
+    MW["helmet, CORS, JWT auth,<br/>role + clinic checks, zod validation"]
+    CALL["set_actor, call package,<br/>map ORA-20xxx to HTTP"]
+    MW --> CALL
+  end
+  subgraph Oracle["Oracle XE 21c (XEPDB1), schema vaxapp"]
+    PKG["PL/SQL packages<br/>newborn_vaccination_pkg<br/>vaccine_inventory_pkg<br/>vax_reporting_pkg"]
+    TRG["Triggers: DOB check, status guard,<br/>overdue and low-stock alerts, audit"]
+    TBL[("Tables<br/>newborns, dose_records,<br/>vaccine_inventory, alerts, audit_log ...")]
+    JOB["DBMS_SCHEDULER<br/>JOB_DAILY_VAX_SWEEP"]
+    PKG --> TBL
+    TBL --- TRG
+    JOB --> PKG
+  end
+  UI -- "JSON over HTTP + JWT" --> MW
+  CALL -- "node-oracledb, bind variables only" --> PKG

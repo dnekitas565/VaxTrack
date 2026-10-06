@@ -1,0 +1,421 @@
+### VaxTrack API requests for the VS Code "REST Client" extension (humao.rest-client).
+### Run the requests from top to bottom: later ones reuse tokens and ids captured from earlier ones.
+### Start the API first (cd api; npm run dev) and load the demo seed (db/10_seed_demo.sql).
+### Responses use snake_case keys; dates are YYYY-MM-DD.
+
+@host = http://localhost:4000
+
+############################################################ AUTH
+### Login as nurse1 (Sunrise clinic)  -> 200 + token
+# @name loginNurse1
+POST {{host}}/auth/login
+Content-Type: application/json
+
+{ "username": "nurse1", "password": "Nurse@123" }
+
+###
+@nurse1 = {{loginNurse1.response.body.token}}
+
+### Login as nurse2 (CityCare clinic)
+# @name loginNurse2
+POST {{host}}/auth/login
+Content-Type: application/json
+
+{ "username": "nurse2", "password": "Nurse@123" }
+
+###
+@nurse2 = {{loginNurse2.response.body.token}}
+
+### Login as admin
+# @name loginAdmin
+POST {{host}}/auth/login
+Content-Type: application/json
+
+{ "username": "admin", "password": "Admin@123" }
+
+###
+@admin = {{loginAdmin.response.body.token}}
+
+### Login as parent1 (guardian of Aarav Sharma)
+# @name loginParent1
+POST {{host}}/auth/login
+Content-Type: application/json
+
+{ "username": "parent1", "password": "Parent@123" }
+
+###
+@parent1 = {{loginParent1.response.body.token}}
+
+### Login as parent2 (guardian of Diya Menon)
+# @name loginParent2
+POST {{host}}/auth/login
+Content-Type: application/json
+
+{ "username": "parent2", "password": "Parent@123" }
+
+###
+@parent2 = {{loginParent2.response.body.token}}
+
+### FAIL: wrong password -> 401
+POST {{host}}/auth/login
+Content-Type: application/json
+
+{ "username": "nurse1", "password": "wrong" }
+
+### FAIL: missing password -> 400
+POST {{host}}/auth/login
+Content-Type: application/json
+
+{ "username": "nurse1" }
+
+### Who am I -> 200
+GET {{host}}/me
+Authorization: Bearer {{nurse1}}
+
+### FAIL: no token -> 401
+GET {{host}}/me
+
+############################################################ DASHBOARD  (ADMIN, NURSE)
+### Summary -> 200 (runs refresh_overdue_status first)
+GET {{host}}/dashboard/summary
+Authorization: Bearer {{nurse1}}
+
+### Admin, all clinics
+GET {{host}}/dashboard/summary
+Authorization: Bearer {{admin}}
+
+### FAIL: parent -> 403
+GET {{host}}/dashboard/summary
+Authorization: Bearer {{parent1}}
+
+### FAIL: nurse asking for another clinic -> 403
+GET {{host}}/dashboard/summary?clinicId=999
+Authorization: Bearer {{nurse1}}
+
+### Overdue now -> 200
+GET {{host}}/dashboard/overdue
+Authorization: Bearer {{nurse1}}
+
+### Due in 7 days -> 200
+GET {{host}}/dashboard/upcoming?days=7
+Authorization: Bearer {{nurse1}}
+
+### FAIL: bad days -> 400
+GET {{host}}/dashboard/upcoming?days=abc
+Authorization: Bearer {{nurse1}}
+
+############################################################ NEWBORNS
+### Register a baby born 10 days ago (nurse1's clinic is used) -> 201, 24 timeline rows
+# @name register
+POST {{host}}/newborns
+Authorization: Bearer {{nurse1}}
+Content-Type: application/json
+
+{
+  "guardian": { "name": "Http Guardian", "phone": "9123456780", "email": "http@example.com", "address": "1 Test Road" },
+  "baby": { "name": "Http Baby", "gender": "F", "dob": "2026-09-26", "birthWeightKg": 3.1 },
+  "includeRegional": false
+}
+
+###
+@babyId = {{register.response.body.baby_id}}
+@birthDose = {{register.response.body.$.timeline[0].record_id}}
+@sixWeekDose = {{register.response.body.$.timeline[3].record_id}}
+
+### Register with the JE (endemic district) box ticked -> 201, 26 timeline rows
+POST {{host}}/newborns
+Authorization: Bearer {{nurse1}}
+Content-Type: application/json
+
+{
+  "guardian": { "name": "Http Guardian JE", "phone": "9123456781" },
+  "baby": { "name": "Http Baby JE", "gender": "M", "dob": "2026-10-01" },
+  "includeRegional": true
+}
+
+### FAIL: future date of birth -> 422 (rolled back)
+POST {{host}}/newborns
+Authorization: Bearer {{nurse1}}
+Content-Type: application/json
+
+{
+  "guardian": { "name": "Http Guardian", "phone": "9123456782" },
+  "baby": { "name": "Http Future", "gender": "M", "dob": "2030-01-01" }
+}
+
+### FAIL: bad gender and phone -> 400
+POST {{host}}/newborns
+Authorization: Bearer {{nurse1}}
+Content-Type: application/json
+
+{ "guardian": { "name": "G", "phone": "abc" }, "baby": { "name": "B", "gender": "X", "dob": "2026-10-01" } }
+
+### FAIL: admin must say which clinic -> 400
+POST {{host}}/newborns
+Authorization: Bearer {{admin}}
+Content-Type: application/json
+
+{
+  "guardian": { "name": "G", "phone": "9123456783" },
+  "baby": { "name": "B", "gender": "M", "dob": "2026-10-01" }
+}
+
+### FAIL: parent cannot register -> 403
+POST {{host}}/newborns
+Authorization: Bearer {{parent1}}
+Content-Type: application/json
+
+{
+  "guardian": { "name": "G", "phone": "9123456784" },
+  "baby": { "name": "B", "gender": "M", "dob": "2026-10-01" }
+}
+
+### List / search (name, guardian name or phone) -> 200
+GET {{host}}/newborns?search=aarav
+Authorization: Bearer {{nurse1}}
+
+### Parent sees only their own child -> 200
+GET {{host}}/newborns
+Authorization: Bearer {{parent1}}
+
+### Profile + timeline -> 200
+GET {{host}}/newborns/{{babyId}}
+Authorization: Bearer {{nurse1}}
+
+### FAIL: another clinic's nurse -> 403
+GET {{host}}/newborns/{{babyId}}
+Authorization: Bearer {{nurse2}}
+
+### FAIL: a parent opening someone else's child -> 403  (baby 1 is Aarav, parent2 is not his guardian)
+GET {{host}}/newborns/1
+Authorization: Bearer {{parent2}}
+
+### FAIL: unknown baby -> 404
+GET {{host}}/newborns/99999999
+Authorization: Bearer {{admin}}
+
+############################################################ DOSES  (ADMIN, NURSE)
+### Which batch will be used, and is the dose allowed yet? -> 200
+GET {{host}}/doses/{{birthDose}}/batch-preview
+Authorization: Bearer {{nurse1}}
+
+### Mark the birth dose administered today -> 200 (stock drops by 1)
+POST {{host}}/doses/{{birthDose}}/administer
+Authorization: Bearer {{nurse1}}
+Content-Type: application/json
+
+{}
+
+### FAIL: same dose again -> 409
+POST {{host}}/doses/{{birthDose}}/administer
+Authorization: Bearer {{nurse1}}
+Content-Type: application/json
+
+{}
+
+### FAIL: 6-week dose on a 10-day-old baby -> 422 too early
+POST {{host}}/doses/{{sixWeekDose}}/administer
+Authorization: Bearer {{nurse1}}
+Content-Type: application/json
+
+{}
+
+### FAIL: date in the future -> 422
+POST {{host}}/doses/{{sixWeekDose}}/administer
+Authorization: Bearer {{nurse1}}
+Content-Type: application/json
+
+{ "administeredDate": "2030-01-01" }
+
+### FAIL: bad date format -> 400
+POST {{host}}/doses/{{sixWeekDose}}/administer
+Authorization: Bearer {{nurse1}}
+Content-Type: application/json
+
+{ "administeredDate": "yesterday" }
+
+### FAIL: parent -> 403
+POST {{host}}/doses/{{sixWeekDose}}/administer
+Authorization: Bearer {{parent1}}
+Content-Type: application/json
+
+{}
+
+### FAIL: nurse from another clinic -> 403
+POST {{host}}/doses/{{sixWeekDose}}/administer
+Authorization: Bearer {{nurse2}}
+Content-Type: application/json
+
+{}
+
+### FAIL: unknown dose -> 404
+POST {{host}}/doses/99999999/administer
+Authorization: Bearer {{nurse1}}
+Content-Type: application/json
+
+{}
+
+### OUT OF STOCK: Tara Joseph's Vitamin A has no stock at CityCare. Find her first.
+# @name findTara
+GET {{host}}/newborns?search=tara
+Authorization: Bearer {{nurse2}}
+
+###
+@taraId = {{findTara.response.body.$[0].baby_id}}
+
+###
+# @name taraProfile
+GET {{host}}/newborns/{{taraId}}
+Authorization: Bearer {{nurse2}}
+
+### The Vitamin A (1st dose) record id: look it up in the response above ("dose_name": "Vitamin A (1st dose)")
+### and put it here. The preview answers 200 with "batch": null and a "batch_error".
+@vitaminADose = 190
+
+###
+GET {{host}}/doses/{{vitaminADose}}/batch-preview
+Authorization: Bearer {{nurse2}}
+
+### FAIL: administering it -> 409 no usable stock (dose stays unchanged)
+POST {{host}}/doses/{{vitaminADose}}/administer
+Authorization: Bearer {{nurse2}}
+Content-Type: application/json
+
+{}
+
+### Reschedule the 6-week dose to a date inside its window (day 42..70 after birth) -> 200
+POST {{host}}/doses/{{sixWeekDose}}/reschedule
+Authorization: Bearer {{nurse1}}
+Content-Type: application/json
+
+{ "newDate": "2026-11-20", "reason": "Parent travelling" }
+
+### FAIL: DONE dose -> 409
+POST {{host}}/doses/{{birthDose}}/reschedule
+Authorization: Bearer {{nurse1}}
+Content-Type: application/json
+
+{ "newDate": "2026-11-20", "reason": "x" }
+
+### FAIL: date in the past -> 422
+POST {{host}}/doses/{{sixWeekDose}}/reschedule
+Authorization: Bearer {{nurse1}}
+Content-Type: application/json
+
+{ "newDate": "2026-01-01", "reason": "x" }
+
+### FAIL: outside the allowed window -> 422
+POST {{host}}/doses/{{sixWeekDose}}/reschedule
+Authorization: Bearer {{nurse1}}
+Content-Type: application/json
+
+{ "newDate": "2026-10-07", "reason": "x" }
+
+### FAIL: reason missing -> 400
+POST {{host}}/doses/{{sixWeekDose}}/reschedule
+Authorization: Bearer {{nurse1}}
+Content-Type: application/json
+
+{ "newDate": "2026-11-20" }
+
+############################################################ INVENTORY  (ADMIN, NURSE)
+### Own clinic's batches -> 200
+GET {{host}}/inventory
+Authorization: Bearer {{nurse1}}
+
+### Admin, one clinic
+GET {{host}}/inventory?clinicId=1
+Authorization: Bearer {{admin}}
+
+### FAIL: nurse asking for another clinic -> 403
+GET {{host}}/inventory?clinicId=999
+Authorization: Bearer {{nurse1}}
+
+### FAIL: parent -> 403
+GET {{host}}/inventory
+Authorization: Bearer {{parent1}}
+
+### Lookups for the forms
+GET {{host}}/vaccines
+Authorization: Bearer {{nurse1}}
+
+###
+GET {{host}}/clinics
+Authorization: Bearer {{admin}}
+
+### Restock BCG (vaccineId 1 may differ: take the id from GET /vaccines) -> 201
+POST {{host}}/inventory/restock
+Authorization: Bearer {{nurse1}}
+Content-Type: application/json
+
+{ "vaccineId": 1, "batchNo": "HTTP-001", "expiryDate": "2027-06-30", "quantity": 25 }
+
+### FAIL: quantity 0 -> 400
+POST {{host}}/inventory/restock
+Authorization: Bearer {{nurse1}}
+Content-Type: application/json
+
+{ "vaccineId": 1, "batchNo": "HTTP-002", "expiryDate": "2027-06-30", "quantity": 0 }
+
+### FAIL: expiry in the past -> 400
+POST {{host}}/inventory/restock
+Authorization: Bearer {{nurse1}}
+Content-Type: application/json
+
+{ "vaccineId": 1, "batchNo": "HTTP-003", "expiryDate": "2020-01-01", "quantity": 5 }
+
+### FAIL: unknown vaccine -> 404
+POST {{host}}/inventory/restock
+Authorization: Bearer {{nurse1}}
+Content-Type: application/json
+
+{ "vaccineId": 99999, "batchNo": "HTTP-004", "expiryDate": "2027-06-30", "quantity": 5 }
+
+############################################################ ALERTS  (ADMIN, NURSE)
+### All alerts of my clinic -> 200
+# @name alerts
+GET {{host}}/alerts
+Authorization: Bearer {{nurse1}}
+
+### Unread overdue alerts only
+GET {{host}}/alerts?unread=1&type=OVERDUE
+Authorization: Bearer {{nurse1}}
+
+### FAIL: unknown type -> 400
+GET {{host}}/alerts?type=BOGUS
+Authorization: Bearer {{nurse1}}
+
+### FAIL: parent -> 403
+GET {{host}}/alerts
+Authorization: Bearer {{parent1}}
+
+###
+@alertId = {{alerts.response.body.$[0].alert_id}}
+
+### Mark read -> 200
+PATCH {{host}}/alerts/{{alertId}}/read
+Authorization: Bearer {{nurse1}}
+
+### FAIL: unknown alert -> 404
+PATCH {{host}}/alerts/99999999/read
+Authorization: Bearer {{nurse1}}
+
+############################################################ REPORTS and AUDIT
+### Coverage per clinic (nurse sees only their own row) -> 200
+GET {{host}}/reports/clinic-coverage
+Authorization: Bearer {{admin}}
+
+### FAIL: parent -> 403
+GET {{host}}/reports/clinic-coverage
+Authorization: Bearer {{parent1}}
+
+### Audit log for one dose, ADMIN only -> 200 (shows "nurse1 (id N)" as the actor)
+GET {{host}}/audit?recordId={{birthDose}}
+Authorization: Bearer {{admin}}
+
+### FAIL: nurse -> 403
+GET {{host}}/audit
+Authorization: Bearer {{nurse1}}
+
+### Liveness (no token)
+GET {{host}}/health

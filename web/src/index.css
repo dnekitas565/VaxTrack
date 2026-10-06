@@ -1,0 +1,71 @@
+@import "tailwindcss";
+
+/* Design tokens. One primary (teal), neutral slate grays, and fixed status colors:
+   green = DONE, amber = due soon, red = OVERDUE, grey = upcoming. */
+@theme {
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+
+  --color-primary-50: #f0fdfa;
+  --color-primary-100: #ccfbf1;
+  --color-primary-200: #99f6e4;
+  --color-primary-600: #0d9488;
+  --color-primary-700: #0f766e;
+  --color-primary-800: #115e59;
+  --color-primary-900: #134e4a;
+
+  --color-done: #16a34a;
+  --color-done-soft: #dcfce7;
+  --color-done-ink: #166534;
+  --color-due: #d97706;
+  --color-due-soft: #fef3c7;
+  --color-due-ink: #92400e;
+  --color-overdue: #dc2626;
+  --color-overdue-soft: #fee2e2;
+  --color-overdue-ink: #991b1b;
+  --color-future: #94a3b8;
+  --color-future-soft: #f1f5f9;
+  --color-future-ink: #475569;
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    @apply bg-slate-50 text-slate-900 antialiased;
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-primary-700);
+    outline-offset: 2px;
+  }
+  button:not(:disabled),
+  [role="button"] {
+    cursor: pointer;
+  }
+}
+
+dialog::backdrop {
+  background: rgb(15 23 42 / 0.55);
+}
+
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+.skeleton {
+  background: linear-gradient(90deg, #e2e8f0 25%, #f1f5f9 50%, #e2e8f0 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .skeleton { animation: none; }
+}
+
+/* Vaccination card: print without the app chrome */
+@media print {
+  .no-print { display: none !important; }
+  body { background: #fff; }
+  main { padding: 0 !important; }
+  .print-card { box-shadow: none !important; border: 1px solid #94a3b8 !important; }
+  @page { margin: 14mm; }
+}

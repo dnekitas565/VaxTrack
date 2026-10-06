@@ -1,0 +1,7 @@
+﻿-- Run once as SYSTEM against the pluggable database (XEPDB1).
+-- Replace the password, then keep the same one in api/.env.
+ALTER SESSION SET CONTAINER = XEPDB1;
+CREATE USER vaxapp IDENTIFIED BY "ChangeMe_123";
+GRANT CREATE SESSION, CREATE TABLE, CREATE SEQUENCE, CREATE PROCEDURE,
+      CREATE TRIGGER, CREATE VIEW, CREATE JOB TO vaxapp;
+ALTER USER vaxapp QUOTA UNLIMITED ON USERS;

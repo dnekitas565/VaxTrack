@@ -1,0 +1,109 @@
+erDiagram
+  CLINICS ||--o{ NEWBORNS : "registers"
+  CLINICS ||--o{ VACCINE_INVENTORY : "stocks"
+  CLINICS |o--o{ APP_USERS : "employs (nurse)"
+  CLINICS |o--o{ ALERTS : "raised for"
+  GUARDIANS ||--o{ NEWBORNS : "is guardian of"
+  GUARDIANS |o--o{ APP_USERS : "login (parent)"
+  NEWBORNS ||--o{ DOSE_RECORDS : "has"
+  NEWBORNS |o--o{ ALERTS : "about"
+  VACCINE_MASTER ||--o{ DOSE_RECORDS : "defines"
+  VACCINE_MASTER ||--o{ VACCINE_INVENTORY : "batch of"
+  VACCINE_INVENTORY |o--o{ DOSE_RECORDS : "supplies"
+  APP_USERS |o--o{ DOSE_RECORDS : "administers"
+  DOSE_RECORDS |o--o{ ALERTS : "triggers"
+
+  CLINICS {
+    number clinic_id PK
+    varchar clinic_name UK
+    varchar city
+    varchar phone
+  }
+  GUARDIANS {
+    number guardian_id PK
+    varchar full_name
+    varchar phone UK
+    varchar email
+    varchar address
+  }
+  APP_USERS {
+    number user_id PK
+    varchar username UK
+    varchar password_hash
+    varchar role "ADMIN|NURSE|PARENT"
+    varchar full_name
+    number clinic_id FK
+    number guardian_id FK
+  }
+  NEWBORNS {
+    number baby_id PK
+    number guardian_id FK
+    number clinic_id FK
+    varchar full_name
+    char gender "M|F|O"
+    date date_of_birth
+    number birth_weight_kg
+    date created_at
+  }
+  VACCINE_MASTER {
+    number vaccine_id PK
+    varchar vaccine_name
+    number dose_number
+    varchar disease_covered
+    varchar age_label
+    number min_age_days
+    number due_age_days
+    number max_age_days
+    varchar route
+    char is_regional "Y|N"
+  }
+  VACCINE_INVENTORY {
+    number inventory_id PK
+    number clinic_id FK
+    number vaccine_id FK
+    varchar batch_no
+    date expiry_date
+    number quantity
+    number low_stock_threshold
+  }
+  DOSE_RECORDS {
+    number record_id PK
+    number baby_id FK
+    number vaccine_id FK
+    date scheduled_date
+    date administered_date
+    varchar status "PENDING|DONE|OVERDUE"
+    number inventory_id FK
+    number administered_by FK
+    char is_late "Y|N"
+    varchar remarks
+  }
+  ALERTS {
+    number alert_id PK
+    number baby_id FK
+    number record_id FK
+    number clinic_id FK
+    varchar alert_type
+    varchar message
+    date alert_date
+    char is_read
+  }
+  AUDIT_LOG {
+    number audit_id PK
+    varchar table_name
+    number record_id
+    varchar action
+    varchar old_value
+    varchar new_value
+    varchar changed_by
+    timestamp changed_at
+  }
+  TEST_LOG {
+    number test_id PK
+    varchar tc_code
+    varchar description
+    varchar expected
+    varchar actual
+    varchar result
+    timestamp run_at
+  }
