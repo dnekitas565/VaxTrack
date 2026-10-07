@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, Package, Plus } from 'lucide-react';
+import { AlertTriangle, CalendarX, Package, PackageX, Plus, Boxes } from 'lucide-react';
 import { api, qs } from '../api.js';
 import { useAuth } from '../auth.jsx';
-import { Button, Card, Chip, EmptyState, Field, Modal, PageHeader, QueryBoundary, Skeleton, inputClass, useToast } from '../components/ui.jsx';
+import { Button, Card, Chip, EmptyState, Field, Modal, Notice, PageHeader, QueryBoundary, Skeleton, StatTile, inputClass, useToast } from '../components/ui.jsx';
 import { fmtDate, plural, todayStr } from '../lib/format.js';
+import { usePageTitle } from '../lib/usePageTitle.js';
 
 function ExpiryBadge({ days }) {
   if (days < 0) return <Chip tone="overdue"><AlertTriangle className="size-3" aria-hidden="true" />Expired</Chip>;
@@ -77,12 +78,8 @@ function RestockModal({ onClose, defaultClinic }) {
       }
     >
       <div className="space-y-4">
-        <p className="text-sm text-slate-700">An existing batch number gets the quantity added to it; a new batch number creates a new batch.</p>
-        {error && (
-          <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-900">
-            {error}
-          </p>
-        )}
+        <p className="text-sm text-muted">An existing batch number gets the quantity added to it; a new batch number creates a new batch.</p>
+        {error && <Notice tone="error">{error}</Notice>}
         {isAdmin && (
           <Field label="Clinic" error={errors.clinicId}>
             {(p) => (
@@ -101,7 +98,7 @@ function RestockModal({ onClose, defaultClinic }) {
             </select>
           )}
         </Field>
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Field label="Batch number" error={errors.batchNo}>
             {(p) => <input {...p} className={inputClass} value={f.batchNo} onChange={set('batchNo')} maxLength={40} autoComplete="off" />}
           </Field>
@@ -118,6 +115,7 @@ function RestockModal({ onClose, defaultClinic }) {
 }
 
 export default function Inventory() {
+  usePageTitle('Inventory');
   const { user } = useAuth();
   const isAdmin = user.role === 'ADMIN';
   const [clinicId, setClinicId] = useState('');
@@ -151,53 +149,67 @@ export default function Inventory() {
         }
       />
 
-      <label className="mb-3 flex min-h-11 items-center gap-2 text-sm">
-        <input type="checkbox" className="size-5 accent-primary-700" checked={attention} onChange={(e) => setAttention(e.target.checked)} />
-        Only batches that need attention (low, empty, expired or expiring within 30 days)
-      </label>
-
       <QueryBoundary query={inventory} skeleton={<Skeleton className="h-72 w-full" />}>
         {(all) => {
+          const lowOrEmpty = all.filter((r) => r.is_low === 'Y' || r.quantity === 0).length;
+          const expiring = all.filter((r) => r.days_to_expiry >= 0 && r.days_to_expiry <= 30).length;
+          const expired = all.filter((r) => r.days_to_expiry < 0).length;
           const rows = attention ? all.filter((r) => r.is_low === 'Y' || r.quantity === 0 || r.days_to_expiry <= 30) : all;
-          return rows.length === 0 ? (
-            <Card>
-              <EmptyState icon={Package} title={attention ? 'Nothing needs attention' : 'No stock recorded'}>
-                {attention ? 'Every batch has enough stock and is not close to expiry.' : 'Use Restock to add the first batch.'}
-              </EmptyState>
-            </Card>
-          ) : (
-            <Card className="overflow-x-auto">
-              <table className="w-full min-w-[720px] text-left text-sm">
-                <caption className="sr-only">Vaccine batches with quantity and expiry</caption>
-                <thead className="border-b border-slate-200 bg-slate-50 text-xs uppercase tracking-wide text-slate-600">
-                  <tr>
-                    <th scope="col" className="px-4 py-3">Vaccine</th>
-                    {isAdmin && <th scope="col" className="px-4 py-3">Clinic</th>}
-                    <th scope="col" className="px-4 py-3">Batch</th>
-                    <th scope="col" className="px-4 py-3">Expiry</th>
-                    <th scope="col" className="px-4 py-3 text-right">In stock</th>
-                    <th scope="col" className="px-4 py-3">Status</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {rows.map((r) => (
-                    <tr key={r.inventory_id}>
-                      <th scope="row" className="px-4 py-3 font-medium">{r.vaccine_label}<span className="block text-xs font-normal text-slate-600">{r.age_label}</span></th>
-                      {isAdmin && <td className="px-4 py-3">{r.clinic_name}</td>}
-                      <td className="px-4 py-3 font-mono text-xs">{r.batch_no}</td>
-                      <td className="px-4 py-3">{fmtDate(r.expiry_date)}</td>
-                      <td className="px-4 py-3 text-right tabular-nums">{r.quantity}<span className="block text-xs text-slate-600">alert below {r.low_stock_threshold}</span></td>
-                      <td className="px-4 py-3">
-                        <div className="flex flex-wrap gap-1.5">
-                          <ExpiryBadge days={r.days_to_expiry} />
-                          <StockBadge row={r} />
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </Card>
+          return (
+            <>
+              <div className="mb-5 grid grid-cols-1 gap-4 sm:grid-cols-2 hd:grid-cols-4">
+                <StatTile icon={Boxes} tone="primary" label="Batches" value={all.length} />
+                <StatTile icon={PackageX} tone={lowOrEmpty ? 'due' : 'neutral'} label="Low or empty" value={lowOrEmpty} />
+                <StatTile icon={CalendarX} tone={expiring ? 'due' : 'neutral'} label="Expiring soon" hint="within 30 days" value={expiring} />
+                <StatTile icon={AlertTriangle} tone={expired ? 'overdue' : 'neutral'} label="Expired" value={expired} />
+              </div>
+
+              <label className="mb-3 flex min-h-11 w-fit cursor-pointer items-center gap-2.5 text-sm text-ink-2">
+                <input type="checkbox" className="size-5 accent-[var(--primary)]" checked={attention} onChange={(e) => setAttention(e.target.checked)} />
+                Only batches that need attention (low, empty, expired or expiring within 30 days)
+              </label>
+
+              {rows.length === 0 ? (
+                <Card>
+                  <EmptyState icon={Package} title={attention ? 'Nothing needs attention' : 'No stock recorded'}>
+                    {attention ? 'Every batch has enough stock and is not close to expiry.' : 'Use Restock to add the first batch.'}
+                  </EmptyState>
+                </Card>
+              ) : (
+                <Card className="overflow-x-auto">
+                  <table className="w-full min-w-[720px] text-left text-sm">
+                    <caption className="sr-only">Vaccine batches with quantity and expiry</caption>
+                    <thead className="border-b border-line bg-subtle text-xs uppercase tracking-wide text-muted">
+                      <tr>
+                        <th scope="col" className="px-4 py-3 font-semibold">Vaccine</th>
+                        {isAdmin && <th scope="col" className="px-4 py-3 font-semibold">Clinic</th>}
+                        <th scope="col" className="px-4 py-3 font-semibold">Batch</th>
+                        <th scope="col" className="px-4 py-3 font-semibold">Expiry</th>
+                        <th scope="col" className="px-4 py-3 text-right font-semibold">In stock</th>
+                        <th scope="col" className="px-4 py-3 font-semibold">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-line">
+                      {rows.map((r) => (
+                        <tr key={r.inventory_id} className="transition-colors hover:bg-hover/50">
+                          <th scope="row" className="px-4 py-3 font-medium text-ink">{r.vaccine_label}<span className="block text-xs font-normal text-muted">{r.age_label}</span></th>
+                          {isAdmin && <td className="px-4 py-3 text-ink-2">{r.clinic_name}</td>}
+                          <td className="px-4 py-3 font-mono text-xs text-ink-2">{r.batch_no}</td>
+                          <td className="px-4 py-3 text-ink-2">{fmtDate(r.expiry_date)}</td>
+                          <td className="px-4 py-3 text-right font-medium tabular-nums text-ink">{r.quantity}<span className="block text-xs font-normal text-muted">alert below {r.low_stock_threshold}</span></td>
+                          <td className="px-4 py-3">
+                            <div className="flex flex-wrap gap-1.5">
+                              <ExpiryBadge days={r.days_to_expiry} />
+                              <StockBadge row={r} />
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </Card>
+              )}
+            </>
           );
         }}
       </QueryBoundary>

@@ -485,8 +485,11 @@ CREATE OR REPLACE PACKAGE BODY newborn_vaccination_pkg AS
                 FROM dose_records
                WHERE status = 'PENDING'
                  AND scheduled_date < TRUNC(SYSDATE)) LOOP
-      UPDATE dose_records SET status = 'PENDING' WHERE record_id = r.record_id;
-      v_flipped := v_flipped + 1;
+      -- the status guard matters: a dose marked DONE (or already flipped by a parallel sweep)
+      -- after the cursor read it is skipped instead of tripping trg_dose_status_guard
+      UPDATE dose_records SET status = 'PENDING'
+       WHERE record_id = r.record_id AND status = 'PENDING';
+      v_flipped := v_flipped + SQL%ROWCOUNT;
     END LOOP;
 
     COMMIT;

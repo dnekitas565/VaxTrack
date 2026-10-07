@@ -11,7 +11,8 @@ export async function verifyLogin(conn, username, password) {
   const [user] = await query(
     conn,
     `SELECT user_id, username, password_hash, role, full_name, clinic_id, guardian_id
-       FROM app_users WHERE username = :username`,
+       FROM app_users WHERE LOWER(username) = LOWER(:username)
+      ORDER BY user_id FETCH FIRST 1 ROWS ONLY`,
     { username },
   );
   const ok = await bcrypt.compare(password, user?.password_hash ?? DUMMY_HASH);

@@ -7,7 +7,8 @@
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
     "smoke": "node scripts/smoke.mjs",
-    "hash": "node scripts/hash.js"
+    "hash": "node scripts/hash.js",
+    "authz": "node scripts/authz-matrix.mjs"
   },
   "dependencies": {
     "bcrypt": "^6.0.0",

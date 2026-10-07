@@ -1,51 +1,198 @@
 @import "tailwindcss";
 
-/* Design tokens. One primary (teal), neutral slate grays, and fixed status colors:
-   green = DONE, amber = due soon, red = OVERDUE, grey = upcoming. */
+/* dark: applies inside any element that has an ancestor with class "dark" (set on <html>) */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ---------------------------------------------------------------------------------------------
+   Design tokens. Every colour in the UI is one of these, so light and dark stay consistent.
+   Status colours are fixed app-wide: green = DONE, amber = due soon, red = OVERDUE, grey = upcoming.
+   Each status always travels with an icon and a word, never colour alone.
+   --------------------------------------------------------------------------------------------- */
+:root {
+  color-scheme: light;
+
+  --canvas: #f3f6f9;
+  --surface: #ffffff;
+  --subtle: #f1f5f9;
+  --hover: #e9eef4;
+  --line: #e2e8f0;
+  --line-strong: #cbd5e1;
+
+  --ink: #0f172a;
+  --ink-2: #334155;
+  --muted: #475569;
+  --faint: #64748b;
+
+  --primary: #0f766e;
+  --primary-hover: #115e59;
+  --on-primary: #ffffff;
+  --primary-ink: #0f766e;
+  --primary-soft: #ccfbf1;
+  --primary-soft-ink: #134e4a;
+
+  --done: #16a34a;
+  --done-soft: #dcfce7;
+  --done-ink: #166534;
+  --due: #d97706;
+  --due-soft: #fef3c7;
+  --due-ink: #92400e;
+  --overdue: #dc2626;
+  --overdue-soft: #fee2e2;
+  --overdue-ink: #991b1b;
+  --future: #94a3b8;
+  --future-soft: #eef2f6;
+  --future-ink: #475569;
+
+  --danger: #b91c1c;
+  --danger-hover: #991b1b;
+  --on-danger: #ffffff;
+
+  --shadow: 0 1px 2px rgb(15 23 42 / 0.05), 0 1px 3px rgb(15 23 42 / 0.07);
+  --shadow-pop: 0 20px 40px -12px rgb(15 23 42 / 0.28);
+  --overlay: rgb(15 23 42 / 0.55);
+  --brand-grad: linear-gradient(135deg, #0f766e 0%, #115e59 55%, #134e4a 100%);
+}
+
+.dark {
+  color-scheme: dark;
+
+  --canvas: #0a0f15;
+  --surface: #121a23;
+  --subtle: #19232e;
+  --hover: #212e3c;
+  --line: #243242;
+  --line-strong: #364a60;
+
+  --ink: #e8edf3;
+  --ink-2: #c6d0db;
+  --muted: #9aa8b8;
+  --faint: #8797a8;
+
+  --primary: #2dd4bf;
+  --primary-hover: #5eead4;
+  --on-primary: #042f2e;
+  --primary-ink: #5eead4;
+  --primary-soft: #11332f;
+  --primary-soft-ink: #99f6e4;
+
+  --done: #22c55e;
+  --done-soft: #12301f;
+  --done-ink: #86efac;
+  --due: #f59e0b;
+  --due-soft: #3a2b0c;
+  --due-ink: #fcd34d;
+  --overdue: #ef4444;
+  --overdue-soft: #3b1618;
+  --overdue-ink: #fca5a5;
+  --future: #64748b;
+  --future-soft: #1c2937;
+  --future-ink: #b6c2d0;
+
+  --danger: #dc2626;
+  --danger-hover: #b91c1c;
+  --on-danger: #ffffff;
+
+  --shadow: 0 0 0 1px rgb(255 255 255 / 0.02), 0 1px 3px rgb(0 0 0 / 0.5);
+  --shadow-pop: 0 24px 48px -12px rgb(0 0 0 / 0.7);
+  --overlay: rgb(2 6 12 / 0.7);
+  --brand-grad: linear-gradient(135deg, #0b3f3b 0%, #0f5a54 55%, #0f766e 100%);
+}
+
+/* between lg (1024) and xl (1280): the width where four summary tiles fit beside the sidebar.
+   A plain @theme block (not inline) so Tailwind sorts it with the built-in breakpoints. */
 @theme {
+  --breakpoint-hd: 71.875rem;
+}
+
+@theme inline {
   --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
 
-  --color-primary-50: #f0fdfa;
-  --color-primary-100: #ccfbf1;
-  --color-primary-200: #99f6e4;
-  --color-primary-600: #0d9488;
-  --color-primary-700: #0f766e;
-  --color-primary-800: #115e59;
-  --color-primary-900: #134e4a;
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-subtle: var(--subtle);
+  --color-hover: var(--hover);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
 
-  --color-done: #16a34a;
-  --color-done-soft: #dcfce7;
-  --color-done-ink: #166534;
-  --color-due: #d97706;
-  --color-due-soft: #fef3c7;
-  --color-due-ink: #92400e;
-  --color-overdue: #dc2626;
-  --color-overdue-soft: #fee2e2;
-  --color-overdue-ink: #991b1b;
-  --color-future: #94a3b8;
-  --color-future-soft: #f1f5f9;
-  --color-future-ink: #475569;
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-on-primary: var(--on-primary);
+  --color-primary-ink: var(--primary-ink);
+  --color-primary-soft: var(--primary-soft);
+  --color-primary-soft-ink: var(--primary-soft-ink);
+
+  --color-done: var(--done);
+  --color-done-soft: var(--done-soft);
+  --color-done-ink: var(--done-ink);
+  --color-due: var(--due);
+  --color-due-soft: var(--due-soft);
+  --color-due-ink: var(--due-ink);
+  --color-overdue: var(--overdue);
+  --color-overdue-soft: var(--overdue-soft);
+  --color-overdue-ink: var(--overdue-ink);
+  --color-future: var(--future);
+  --color-future-soft: var(--future-soft);
+  --color-future-ink: var(--future-ink);
+
+  --color-danger: var(--danger);
+  --color-danger-hover: var(--danger-hover);
+  --color-on-danger: var(--on-danger);
+
+  --shadow-card: var(--shadow);
+  --shadow-pop: var(--shadow-pop);
 }
 
 @layer base {
   html {
     -webkit-text-size-adjust: 100%;
+    scroll-behavior: smooth;
   }
   body {
-    @apply bg-slate-50 text-slate-900 antialiased;
+    background: var(--canvas);
+    color: var(--ink);
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    -webkit-font-smoothing: antialiased;
+    transition: background-color 0.2s ease, color 0.2s ease;
   }
   :focus-visible {
-    outline: 2px solid var(--color-primary-700);
+    outline: 2px solid var(--primary-ink);
     outline-offset: 2px;
+    border-radius: 6px;
   }
   button:not(:disabled),
-  [role="button"] {
+  [role="button"],
+  summary {
     cursor: pointer;
+  }
+  ::selection {
+    background: var(--primary-soft);
+    color: var(--primary-soft-ink);
+  }
+  /* native date pickers and scrollbars follow the theme through color-scheme */
+  input,
+  select,
+  textarea {
+    color-scheme: inherit;
   }
 }
 
+dialog {
+  box-shadow: var(--shadow-pop);
+}
 dialog::backdrop {
-  background: rgb(15 23 42 / 0.55);
+  background: var(--overlay);
+  backdrop-filter: blur(2px);
+}
+dialog[open] {
+  animation: pop 0.14s ease-out;
+}
+@keyframes pop {
+  from { opacity: 0; transform: translateY(6px) scale(0.985); }
+  to { opacity: 1; transform: none; }
 }
 
 @keyframes shimmer {
@@ -53,16 +200,29 @@ dialog::backdrop {
   100% { background-position: -200% 0; }
 }
 .skeleton {
-  background: linear-gradient(90deg, #e2e8f0 25%, #f1f5f9 50%, #e2e8f0 75%);
+  background: linear-gradient(90deg, var(--subtle) 25%, var(--hover) 50%, var(--subtle) 75%);
   background-size: 200% 100%;
   animation: shimmer 1.4s linear infinite;
 }
 @media (prefers-reduced-motion: reduce) {
   .skeleton { animation: none; }
+  dialog[open] { animation: none; }
+  html { scroll-behavior: auto; }
+  * { transition: none !important; }
 }
 
-/* Vaccination card: print without the app chrome */
+/* Vaccination card: always print on white, without the app chrome */
 @media print {
+  :root,
+  .dark {
+    color-scheme: light;
+    --canvas: #ffffff; --surface: #ffffff; --subtle: #f1f5f9; --hover: #e9eef4;
+    --line: #cbd5e1; --line-strong: #94a3b8;
+    --ink: #0f172a; --ink-2: #1e293b; --muted: #475569; --faint: #475569;
+    --done-soft: #dcfce7; --done-ink: #166534; --due-soft: #fef3c7; --due-ink: #92400e;
+    --overdue-soft: #fee2e2; --overdue-ink: #991b1b; --future-soft: #eef2f6; --future-ink: #475569;
+    --primary-ink: #0f766e;
+  }
   .no-print { display: none !important; }
   body { background: #fff; }
   main { padding: 0 !important; }

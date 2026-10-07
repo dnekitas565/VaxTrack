@@ -1,8 +1,9 @@
 import { lazy, Suspense } from 'react';
-import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
+import { Link, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { useAuth } from './auth.jsx';
 import Layout from './components/Layout.jsx';
-import { PageSkeleton } from './components/ui.jsx';
+import { PageSkeleton, linkButtonClass } from './components/ui.jsx';
+import { usePageTitle } from './lib/usePageTitle.js';
 import Login from './pages/Login.jsx';
 import Newborns from './pages/Newborns.jsx';
 import BabyProfile from './pages/BabyProfile.jsx';
@@ -52,10 +53,16 @@ export default function App() {
 }
 
 function NotFound() {
+  usePageTitle('Page not found');
+  const { user } = useAuth();
   return (
-    <div className="py-16 text-center">
-      <h1 className="text-2xl font-semibold">Page not found</h1>
-      <p className="mt-2 text-slate-600">That page does not exist.</p>
+    <div className="mx-auto max-w-md py-20 text-center">
+      <p className="text-5xl font-semibold text-primary-ink">404</p>
+      <h1 className="mt-3 text-2xl font-semibold text-ink">Page not found</h1>
+      <p className="mt-2 text-sm text-muted">The page you opened does not exist or has moved.</p>
+      <Link to={homeFor(user)} className={`${linkButtonClass('primary')} mt-6`}>
+        Go to the start page
+      </Link>
     </div>
   );
 }

@@ -1,21 +1,23 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, Bell, CalendarClock, Check, Clock, PackageX, Hourglass } from 'lucide-react';
+import { AlertTriangle, Bell, CalendarClock, Check, Clock, Hourglass, PackageX } from 'lucide-react';
 import { api, qs } from '../api.js';
-import { Button, Card, EmptyState, PageHeader, QueryBoundary, Skeleton, useToast } from '../components/ui.jsx';
-import { ALERT_TYPES, fmtDate } from '../lib/format.js';
+import { Button, Card, Chip, EmptyState, FilterChips, PageHeader, QueryBoundary, Skeleton, cx, useToast } from '../components/ui.jsx';
+import { ALERT_TYPES, fmtDate, prettifyDates } from '../lib/format.js';
+import { usePageTitle } from '../lib/usePageTitle.js';
 
 const TYPE_ICON = { OVERDUE: AlertTriangle, DUE_SOON: CalendarClock, LATE_DOSE: Clock, LOW_STOCK: PackageX, EXPIRY: Hourglass };
 const TYPE_TONE = {
-  OVERDUE: 'bg-overdue-soft text-overdue-ink',
-  DUE_SOON: 'bg-due-soft text-due-ink',
-  LATE_DOSE: 'bg-due-soft text-due-ink',
-  LOW_STOCK: 'bg-due-soft text-due-ink',
-  EXPIRY: 'bg-overdue-soft text-overdue-ink',
+  OVERDUE: { tile: 'bg-overdue-soft text-overdue-ink', edge: 'border-l-overdue' },
+  EXPIRY: { tile: 'bg-overdue-soft text-overdue-ink', edge: 'border-l-overdue' },
+  DUE_SOON: { tile: 'bg-due-soft text-due-ink', edge: 'border-l-due' },
+  LATE_DOSE: { tile: 'bg-due-soft text-due-ink', edge: 'border-l-due' },
+  LOW_STOCK: { tile: 'bg-due-soft text-due-ink', edge: 'border-l-due' },
 };
 
 export default function Alerts() {
+  usePageTitle('Alerts');
   const toast = useToast();
   const qc = useQueryClient();
   const [type, setType] = useState('');
@@ -41,20 +43,10 @@ export default function Alerts() {
     <>
       <PageHeader title="Alerts center" subtitle="Overdue and due-soon doses, late doses, low stock and expiring batches." />
 
-      <div className="mb-4 flex flex-wrap items-center gap-2" role="group" aria-label="Filter alerts by type">
-        {filters.map(([value, label]) => (
-          <button
-            key={value || 'all'}
-            type="button"
-            aria-pressed={type === value}
-            onClick={() => setType(value)}
-            className={`min-h-11 rounded-full border px-4 text-sm font-medium ${type === value ? 'border-primary-700 bg-primary-700 text-white' : 'border-slate-300 bg-white text-slate-800 hover:bg-slate-50'}`}
-          >
-            {label}
-          </button>
-        ))}
-        <label className="ml-auto flex min-h-11 items-center gap-2 text-sm">
-          <input type="checkbox" className="size-5 accent-primary-700" checked={unread} onChange={(e) => setUnread(e.target.checked)} />
+      <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+        <FilterChips label="Filter alerts by type" value={type} onChange={setType} options={filters} />
+        <label className="flex min-h-11 cursor-pointer items-center gap-2.5 text-sm text-ink-2">
+          <input type="checkbox" className="size-5 accent-[var(--primary)]" checked={unread} onChange={(e) => setUnread(e.target.checked)} />
           Unread only
         </label>
       </div>
@@ -69,22 +61,30 @@ export default function Alerts() {
             <ul className="space-y-3" aria-label="Alerts">
               {rows.map((a) => {
                 const Icon = TYPE_ICON[a.alert_type] ?? Bell;
+                const tone = TYPE_TONE[a.alert_type] ?? TYPE_TONE.DUE_SOON;
                 const read = a.is_read === 'Y';
                 return (
                   <li key={a.alert_id}>
-                    <Card className={`flex flex-wrap items-start gap-3 p-4 ${read ? 'opacity-70' : ''}`}>
-                      <span className={`rounded-lg p-2 ${TYPE_TONE[a.alert_type]}`}>
+                    <Card className={cx('flex flex-wrap items-start gap-4 border-l-4 p-4', tone.edge, read && 'bg-subtle shadow-none')}>
+                      <span className={cx('rounded-xl p-2.5', tone.tile)}>
                         <Icon className="size-5" aria-hidden="true" />
                       </span>
                       <div className="min-w-0 flex-1">
-                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">
-                          {ALERT_TYPES[a.alert_type]?.label} · {fmtDate(a.alert_date)}
-                          {a.clinic_name ? ` · ${a.clinic_name}` : ''}
-                          {!read && <span className="ml-2 rounded bg-primary-100 px-1.5 py-0.5 text-primary-900">New</span>}
+                        <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs font-semibold uppercase tracking-wide text-muted">
+                          <span>{ALERT_TYPES[a.alert_type]?.label}</span>
+                          <span aria-hidden="true">·</span>
+                          <span>{fmtDate(a.alert_date)}</span>
+                          {a.clinic_name && (
+                            <>
+                              <span aria-hidden="true">·</span>
+                              <span>{a.clinic_name}</span>
+                            </>
+                          )}
+                          {!read && <Chip tone="primary">New</Chip>}
                         </p>
-                        <p className="mt-1 text-sm">{a.message}</p>
+                        <p className="mt-1.5 text-sm text-ink">{prettifyDates(a.message)}</p>
                         {a.baby_id && (
-                          <Link to={`/newborns/${a.baby_id}`} className="mt-1 inline-block text-sm font-medium text-primary-800 underline">
+                          <Link to={`/newborns/${a.baby_id}`} className="mt-1.5 inline-block text-sm font-medium text-primary-ink underline-offset-2 hover:underline">
                             Open {a.baby_name}
                           </Link>
                         )}

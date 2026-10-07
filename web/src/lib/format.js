@@ -5,6 +5,9 @@ export function fmtDate(s) {
   return new Date(y, m - 1, d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
+/** Rewrites ISO dates inside free text ("was due 2026-09-29") to the app style ("29 Sep 2026") */
+export const prettifyDates = (text) => String(text ?? '').replace(/(\d{4}-\d{2}-\d{2})/g, (m) => fmtDate(m));
+
 export function fmtDateTime(s) {
   if (!s) return '—';
   return `${fmtDate(s)} ${String(s).slice(11, 16)}`;
