@@ -2,6 +2,9 @@ import { Router } from 'express';
 import { withConn, query, num } from '../db.js';
 import { parse, schemas } from '../validate.js';
 import { verifyLogin, signToken, requireAuth, loginThrottle } from '../auth.js';
+import { config } from '../config.js';
+import { HttpError } from '../errors.js';
+import { loadLogins, writeLoginsFile } from '../logins.js';
 
 const router = Router();
 
@@ -31,6 +34,15 @@ router.post('/auth/login', async (req, res) => {
       guardianId: user.guardian_id,
     },
   });
+});
+
+// GET /auth/demo-logins  (development only: DEMO_LOGINS=true) -> every account with its password,
+// read live from the database. Also refreshes LOGINS.md, so the sheet never goes stale.
+router.get('/auth/demo-logins', async (_req, res) => {
+  if (!config.demoLogins) throw new HttpError(404, 'Not found');
+  const list = await withConn(null, (conn) => loadLogins(conn));
+  writeLoginsFile(list);
+  res.json(list.map(({ username, role, full_name, clinic_name, children, password }) => ({ username, role, full_name, clinic_name, children, password })));
 });
 
 // GET /me

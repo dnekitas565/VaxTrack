@@ -10,7 +10,10 @@
 --   * min_age_days = due_age_days (a dose is allowed from its due age).
 --   * route and disease_covered are standard UIP facts, not stated in the NIS PDF.
 --   * JE rows are is_regional = 'Y' (endemic districts only, NIS footnote).
--- Demo passwords (dev only): Admin@123, Nurse@123, Parent@123
+-- Demo passwords (dev only): Admin@123, Nurse@123, Parent@123 (one default per role).
+-- One nurse per clinic (nurse1..nurse4). Parent logins for the demo babies are created by
+-- register_newborn in 10_seed_demo.sql (username = the guardian's phone number).
+-- The full, always-current list of logins is generated into LOGINS.md (see README).
 -- ============================================================================
 SET DEFINE OFF
 SET ECHO ON
@@ -90,6 +93,10 @@ USING (
          'Anita Rao', 'Sunrise Child Health Clinic', NULL FROM dual UNION ALL
   SELECT 'nurse2', '$2b$10$397xtfNEv1JDd875vSqG3ePaOibpAbVQ0M.epjYdATfT8ccLLNCPO', 'NURSE',
          'Kavita Nair', 'CityCare Pediatric Centre', NULL FROM dual UNION ALL
+  SELECT 'nurse3', '$2b$10$397xtfNEv1JDd875vSqG3ePaOibpAbVQ0M.epjYdATfT8ccLLNCPO', 'NURSE',
+         'Meena Pillai', 'Lotus Mother and Baby Clinic', NULL FROM dual UNION ALL
+  SELECT 'nurse4', '$2b$10$397xtfNEv1JDd875vSqG3ePaOibpAbVQ0M.epjYdATfT8ccLLNCPO', 'NURSE',
+         'Divya Menon', 'Green Valley Immunization Centre', NULL FROM dual UNION ALL
   SELECT 'parent1', '$2b$10$iJ5oCCMdjSHPkWsE7ML18eFjOFobdxR8ZrOm5s2Nyes7odiQcASu.', 'PARENT',
          'Priya Sharma', NULL, '9876500001' FROM dual UNION ALL
   SELECT 'parent2', '$2b$10$iJ5oCCMdjSHPkWsE7ML18eFjOFobdxR8ZrOm5s2Nyes7odiQcASu.', 'PARENT',

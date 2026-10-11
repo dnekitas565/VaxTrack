@@ -38,6 +38,7 @@ const routes = [
   ['GET', '/dashboard/overdue', undefined, STAFF],
   ['GET', '/dashboard/upcoming', undefined, STAFF],
   ['POST', '/newborns', {}, STAFF],
+  ['GET', '/newborns/guardian-lookup?phone=9876500001', undefined, STAFF],
   ['GET', '/newborns', undefined, ALL],
   ['GET', `/newborns/${ownBaby}`, undefined, ALL],
   ['POST', '/doses/99999999/administer', { administeredDate: 'x' }, STAFF],
@@ -51,6 +52,12 @@ const routes = [
   ['GET', '/audit', undefined, ['admin']],
   ['GET', '/clinics', undefined, STAFF],
   ['GET', '/vaccines', undefined, STAFF],
+  ['GET', '/users', undefined, ['admin']],
+  ['GET', '/users/options', undefined, ['admin']],
+  ['POST', '/users', {}, ['admin']],
+  ['PATCH', '/newborns/99999999', {}, ['admin']],
+  ['DELETE', '/newborns/99999999', undefined, ['admin']],
+  ['GET', '/auth/demo-logins', undefined, ['anon', ...ALL]], // development switch DEMO_LOGINS=true
 ];
 
 let bad = 0;

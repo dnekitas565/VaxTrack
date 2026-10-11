@@ -165,12 +165,12 @@ BEGIN
   SELECT user_id INTO v_nurse FROM app_users WHERE username = 'nurse1';
 
   p('--- register_newborn: guardian + baby + schedule in one transaction');
-  newborn_vaccination_pkg.register_newborn('Fig Guardian', '9111111111', NULL, NULL, 'FIGDEMO_Baby', 'F',
+  newborn_vaccination_pkg.register_newborn('Fig Guardian', '9111111111', NULL, 'Fig Street 1', 'FIGDEMO_Baby', 'F',
                                            TRUNC(SYSDATE) - 70, 3.1, v_sunrise, 'N', v_baby);
   SELECT COUNT(*) INTO v_n FROM dose_records WHERE baby_id = v_baby;
   p('baby_id = ' || v_baby || ', born ' || TO_CHAR(TRUNC(SYSDATE) - 70, 'YYYY-MM-DD') || ' (70 days ago), doses scheduled = ' || v_n);
   BEGIN
-    newborn_vaccination_pkg.register_newborn('Fig Guardian 2', '9111111112', NULL, NULL, 'FIGDEMO_Future', 'M',
+    newborn_vaccination_pkg.register_newborn('Fig Guardian 2', '9111111112', NULL, 'Fig Street 1', 'FIGDEMO_Future', 'M',
                                              TRUNC(SYSDATE) + 5, 3.0, v_sunrise, 'N', v_n);
   EXCEPTION WHEN OTHERS THEN
     SELECT COUNT(*) INTO v_n FROM guardians WHERE phone = '9111111112';
@@ -206,7 +206,7 @@ BEGIN
     newborn_vaccination_pkg.reschedule_dose(v_rec, TRUNC(SYSDATE) + 3, 'test', v_nurse);
   EXCEPTION WHEN OTHERS THEN p('reschedule a DONE dose  -> ' || SQLERRM); END;
 
-  newborn_vaccination_pkg.register_newborn('Fig Guardian', '9111111111', NULL, NULL, 'FIGDEMO_Infant', 'M',
+  newborn_vaccination_pkg.register_newborn('Fig Guardian', '9111111111', NULL, 'Fig Street 1', 'FIGDEMO_Infant', 'M',
                                            TRUNC(SYSDATE) - 300, 3.0, v_city, 'N', v_infant);
   v_vita := vid('Vitamin A', 1);
   v_rec2 := rec(v_infant, 'Vitamin A', 1);

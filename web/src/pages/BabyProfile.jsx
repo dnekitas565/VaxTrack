@@ -1,7 +1,7 @@
 import { useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, ArrowLeft, Building2, CalendarClock, FileText, Package, Phone, Syringe, User } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Building2, CalendarClock, FileText, Package, Pencil, Phone, Syringe, Trash2, User } from 'lucide-react';
 import { api, qs } from '../api.js';
 import { useAuth, canManage } from '../auth.jsx';
 import Timeline from '../components/Timeline.jsx';
@@ -183,6 +183,156 @@ function RescheduleModal({ dose, baby, onClose }) {
   );
 }
 
+// ---------------------------------------------------------------- Edit newborn (administrator only)
+function EditNewbornModal({ baby, onClose }) {
+  const toast = useToast();
+  const refresh = useRefreshAfterDoseChange(baby.baby_id);
+  const [form, setForm] = useState({
+    name: baby.full_name,
+    gender: baby.gender,
+    dob: baby.date_of_birth,
+    weight: baby.birth_weight_kg ?? '',
+  });
+  const [error, setError] = useState('');
+  const [touched, setTouched] = useState(false);
+  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  const save = useMutation({
+    mutationFn: () =>
+      api.patch(`/newborns/${baby.baby_id}`, {
+        name: form.name.trim(),
+        gender: form.gender,
+        dob: form.dob,
+        birthWeightKg: form.weight === '' ? null : Number(form.weight),
+      }),
+    onSuccess: () => {
+      toast.success(`${form.name.trim()} updated`);
+      refresh();
+      onClose();
+    },
+    onError: (err) => setError(err.message),
+  });
+
+  const errors = {
+    name: !form.name.trim() ? 'Enter the baby’s name.' : '',
+    dob: !form.dob ? 'Enter the date of birth.' : form.dob > todayStr() ? 'The date of birth cannot be in the future.' : '',
+    weight: form.weight !== '' && !(Number(form.weight) >= 0.5 && Number(form.weight) <= 9.99) ? 'Enter a weight between 0.5 and 9.99 kg.' : '',
+  };
+  const invalid = Object.values(errors).some(Boolean);
+  const dobChanged = form.dob !== baby.date_of_birth;
+
+  return (
+    <Modal
+      title={`Edit ${baby.full_name}`}
+      onClose={onClose}
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose} disabled={save.isPending}>
+            Cancel
+          </Button>
+          <Button
+            icon={Pencil}
+            loading={save.isPending}
+            onClick={() => {
+              setTouched(true);
+              setError('');
+              if (!invalid) save.mutate();
+            }}
+          >
+            Save changes
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-4">
+        {error && <Notice tone="error">{error}</Notice>}
+        <Field label="Full name" error={touched ? errors.name : ''}>
+          {(p) => <input {...p} className={inputClass} value={form.name} onChange={set('name')} maxLength={100} autoComplete="off" />}
+        </Field>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <Field label="Gender">
+            {(p) => (
+              <select {...p} className={inputClass} value={form.gender} onChange={set('gender')}>
+                <option value="F">Female</option>
+                <option value="M">Male</option>
+                <option value="O">Other</option>
+              </select>
+            )}
+          </Field>
+          <Field label="Birth weight in kg (optional)" error={touched ? errors.weight : ''}>
+            {(p) => <input {...p} type="number" step="0.01" min="0.5" max="9.99" inputMode="decimal" className={inputClass} value={form.weight} onChange={set('weight')} />}
+          </Field>
+        </div>
+        <Field label="Date of birth" error={touched ? errors.dob : ''}>
+          {(p) => <input {...p} type="date" max={todayStr()} className={inputClass} value={form.dob} onChange={set('dob')} />}
+        </Field>
+        <Notice tone={dobChanged ? 'warn' : 'info'}>
+          Changing the date of birth moves the due date of every dose that has not been given yet. Doses already given keep their dates, and the change is
+          refused if one of them would fall before its minimum age.
+        </Notice>
+      </div>
+    </Modal>
+  );
+}
+
+// ---------------------------------------------------------------- Delete newborn (administrator only)
+function DeleteNewbornModal({ baby, onClose }) {
+  const toast = useToast();
+  const navigate = useNavigate();
+  const refresh = useRefreshAfterDoseChange(baby.baby_id);
+  const [confirmName, setConfirmName] = useState('');
+  const [restore, setRestore] = useState(false);
+  const [error, setError] = useState('');
+  const matches = confirmName.trim().toLowerCase() === baby.full_name.trim().toLowerCase();
+
+  const remove = useMutation({
+    mutationFn: () => api.delete(`/newborns/${baby.baby_id}${restore ? '?restoreStock=1' : ''}`),
+    onSuccess: () => {
+      toast.success(`${baby.full_name} deleted`);
+      refresh();
+      navigate('/newborns', { replace: true });
+    },
+    onError: (err) => setError(err.message),
+  });
+
+  return (
+    <Modal
+      title={`Delete ${baby.full_name}`}
+      onClose={onClose}
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose} disabled={remove.isPending}>
+            Cancel
+          </Button>
+          <Button variant="danger" icon={Trash2} loading={remove.isPending} disabled={!matches} onClick={() => { setError(''); remove.mutate(); }}>
+            Delete permanently
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-4">
+        {error && <Notice tone="error">{error}</Notice>}
+        <Notice tone="warn">
+          This permanently removes {baby.full_name}, all {baby.doses_total} scheduled doses and their alerts. The guardian and the guardian’s login are kept.
+          The audit log keeps a record of who deleted it. This cannot be undone.
+        </Notice>
+        {baby.doses_done > 0 && (
+          <label className="flex min-h-11 cursor-pointer items-start gap-3 rounded-lg border border-line bg-subtle p-3 text-sm">
+            <input type="checkbox" className="mt-0.5 size-5 accent-[var(--primary)]" checked={restore} onChange={(e) => setRestore(e.target.checked)} />
+            <span>
+              <span className="font-medium text-ink">Return the {baby.doses_done} given dose{baby.doses_done === 1 ? '' : 's'} to stock</span>
+              <span className="block text-muted">Tick this only when the record was entered by mistake. Leave it off when the vaccines really were used.</span>
+            </span>
+          </label>
+        )}
+        <Field label={`Type “${baby.full_name}” to confirm`}>
+          {(p) => <input {...p} className={inputClass} value={confirmName} onChange={(e) => setConfirmName(e.target.value)} autoComplete="off" />}
+        </Field>
+      </div>
+    </Modal>
+  );
+}
+
 // ---------------------------------------------------------------- page
 function Fact({ icon: Icon, label, children }) {
   // dt and dd stay the only children of the group, which keeps the definition list valid for screen readers
@@ -200,7 +350,8 @@ function Fact({ icon: Icon, label, children }) {
 export default function BabyProfile() {
   const { id } = useParams();
   const { user } = useAuth();
-  const [modal, setModal] = useState(null); // { kind: 'administer' | 'reschedule', dose }
+  const [modal, setModal] = useState(null); // { kind: 'administer' | 'reschedule' | 'edit' | 'delete', dose? }
+  const isAdmin = user.role === 'ADMIN';
   const [filter, setFilter] = useState('');
   const profile = useQuery({ queryKey: ['baby', id], queryFn: () => api.get(`/newborns/${id}`), staleTime: 0 });
   usePageTitle(profile.data?.baby.full_name ?? 'Baby profile');
@@ -228,10 +379,22 @@ export default function BabyProfile() {
                       </p>
                     </div>
                   </div>
-                  <Link to={`/newborns/${baby.baby_id}/card`} className={`no-print ${linkButtonClass('secondary')}`}>
-                    <FileText className="size-4" aria-hidden="true" />
-                    Vaccination card
-                  </Link>
+                  <div className="no-print flex flex-wrap gap-2">
+                    {isAdmin && (
+                      <>
+                        <Button variant="secondary" icon={Pencil} onClick={() => setModal({ kind: 'edit' })}>
+                          Edit
+                        </Button>
+                        <Button variant="secondary" icon={Trash2} className="text-overdue-ink" onClick={() => setModal({ kind: 'delete' })}>
+                          Delete
+                        </Button>
+                      </>
+                    )}
+                    <Link to={`/newborns/${baby.baby_id}/card`} className={linkButtonClass('secondary')}>
+                      <FileText className="size-4" aria-hidden="true" />
+                      Vaccination card
+                    </Link>
+                  </div>
                 </div>
 
                 <div className="mt-6 grid grid-cols-1 gap-6 border-t border-line pt-6 md:grid-cols-[auto_1fr_1fr]">
@@ -291,6 +454,8 @@ export default function BabyProfile() {
                     : undefined
                 }
               />
+              {modal?.kind === 'edit' && <EditNewbornModal baby={baby} onClose={() => setModal(null)} />}
+              {modal?.kind === 'delete' && <DeleteNewbornModal baby={baby} onClose={() => setModal(null)} />}
               {modal?.kind === 'administer' && <AdministerModal dose={modal.dose} baby={baby} onClose={() => setModal(null)} />}
               {modal?.kind === 'reschedule' && <RescheduleModal dose={modal.dose} baby={baby} onClose={() => setModal(null)} />}
             </>

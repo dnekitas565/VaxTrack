@@ -26,6 +26,8 @@ PROMPT >>> 02_seed_reference.sql
 @@02_seed_reference.sql
 PROMPT >>> 03_functions.sql
 @@03_functions.sql
+PROMPT >>> 03b_pkg_accounts.sql
+@@03b_pkg_accounts.sql
 PROMPT >>> 04_pkg_newborn.sql
 @@04_pkg_newborn.sql
 PROMPT >>> 05_pkg_inventory.sql

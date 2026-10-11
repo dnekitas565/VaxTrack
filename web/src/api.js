@@ -70,6 +70,7 @@ export const api = {
   get: (path) => request('GET', path),
   post: (path, body = {}) => request('POST', path, body),
   patch: (path, body = {}) => request('PATCH', path, body),
+  delete: (path) => request('DELETE', path),
 };
 
 /** Builds "?a=1&b=2" from an object, skipping empty values */

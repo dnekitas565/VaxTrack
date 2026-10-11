@@ -10,7 +10,7 @@ Figure numbers (`fig_NN`) refer to the master list in [report_notes.md](report_n
 
 1. Clean state and evidence log (database): `cd db`, then
    `sqlplus vaxapp@localhost:1521/XEPDB1 @run_all.sql`
-   Expect: 20 PASS, `invalid_objects 0`, `failed_tests 0` at the end, and `report/run_all.log` written.
+   Expect: 31 PASS, `invalid_objects 0`, `failed_tests 0` at the end, and `report/run_all.log` written.
    Capture the terminal while it runs, showing the scripts executing in order (fig_05), and the final `test_log` table (fig_36).
 2. Start the API: `cd api; npm run dev` and the web app: `cd web; npm run dev` (or `npm run build; npm run preview` for the production build).
    Restart the dev server if you changed many files since it started.
@@ -21,8 +21,10 @@ Starting numbers after step 1 (Sunrise clinic, nurse1): alerts badge 15, "Doses 
 ## 1. Nurse signs in (fig_19)
 
 - Open the app, capture the **sign-in page** before logging in (fig_19).
+- On the sign-in page every account is listed with its password (the same list is in `LOGINS.md`). Click **nurse1**: both fields are filled and the
+  password is shown. Capture it (fig_52). The eye button on the password box shows or hides what you type.
 - Sign in as `nurse1` / `Nurse@123`.
-- Expected: Dashboard for "Sunrise Child Health Clinic"; sidebar shows **Alerts 15**; tiles Babies 5, Doses overdue 7.
+- Expected: Dashboard for "Sunrise Child Health Clinic"; sidebar shows **Alerts 15**; tiles Babies 6 (Aarav and his sister Myra Sharma are one family), Doses overdue 7.
 
 ## 2. Restock a batch that will run low (fig_28)
 
@@ -37,8 +39,12 @@ Starting numbers after step 1 (Sunrise clinic, nurse1): alerts badge 15, "Doses 
 - Sidebar **Register newborn**. First click **Register and create schedule** with an empty form and capture the
   **validation errors** (fig_22).
 - Fill: guardian "Demo Baby A Guardian", any 10-digit phone, baby "Demo Baby A", Female, date of birth **70 days ago**.
+  Watch the hint under the phone field: before you type it explains what the number is for; once a valid new number is typed it says **New guardian**
+  (and capture the hint for a number that exists, such as `9876500001`, which says a guardian is already registered and disables the guardian fields: fig_56).
 - Expected after submit: "Newborn registered", **24 doses scheduled**, age bands At birth (0 of 3 given), 6 weeks (0 of 5), 10 weeks (0 of 3),
   14 weeks (0 of 5), 9-11 months (0 of 4), 16-23 months (0 of 4). Capture it (fig_23).
+- Below the banner a card says **Parent login created** with the guardian's username (made from the name, here `demo.baby.a.guardian`) and the default parent password. Capture it (fig_53).
+  The same login is already in `LOGINS.md`, and the parent can sign in with it straight away.
 - Click **Open profile**.
 
 ## 3b. Trigger the overdue state (fig_20)
@@ -84,6 +90,21 @@ Starting numbers after step 1 (Sunrise clinic, nurse1): alerts badge 15, "Doses 
 - Expected: **My children** lists only **Aarav Sharma**, no staff menu, no Register / Inventory / Alerts. Capture it (fig_32).
 - Open Aarav: the timeline has **no "Mark administered" or "Reschedule" buttons**. Click **Vaccination card** and capture the card (fig_31).
   Use **Print or save as PDF** to show the print preview (white background, no sidebar), optional.
+
+## 8b. Users page (fig_51, optional)
+
+- Sign in as `admin` / `Admin@123`, sidebar **Users**: every account, with passwords (switch them off with "Show passwords"). Capture it (fig_51).
+- **Add nurse** creates the next `nurseN` for a clinic; the new account appears in the list and in `LOGINS.md` at once.
+
+## 8c. Admin: correct or delete a newborn (fig_54, fig_55, optional)
+
+- As `admin`, open any baby's profile: **Edit** and **Delete** appear next to *Vaccination card* (nurses and parents do not see them).
+- **Edit**: change the date of birth. The dialog warns that unfinished doses will move. Capture it (fig_54). Save: the age, the due dates and the
+  Overdue / Pending counts all update, and old overdue alerts are replaced by ones that match the new dates.
+- Try a date that would put a given dose before its minimum age: the dialog stays open with the reason.
+- **Delete**: the button stays disabled until you type the baby's name. If doses were recorded as given, a box offers to return them to stock
+  (tick it only for a record entered by mistake). Capture the dialog (fig_55). The guardian and their login are kept.
+- The Audit log (below) shows the `NEWBORNS` UPDATE and DELETE rows with the administrator as actor.
 
 ## 9. Admin audit log (fig_33)
 

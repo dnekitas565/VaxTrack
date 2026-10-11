@@ -32,9 +32,11 @@ export const schemas = {
   }),
   registerNewborn: z.object({
     guardian: z.object({
-      name: z.string().trim().min(1).max(100),
+      // optional only so a known phone number can be reused; the database insists on it for a new guardian
+      name: z.string().trim().max(100).optional(),
       phone,
       email: z.string().trim().email().max(120).optional().or(z.literal('')),
+      // required for a new guardian (the database insists); optional only for a known phone number
       address: z.string().trim().max(250).optional(),
     }),
     baby: z.object({
@@ -46,6 +48,7 @@ export const schemas = {
     clinicId: id.optional(),
     includeRegional: z.boolean().default(false),
   }),
+  guardianLookup: z.object({ phone }),
   administer: z.object({
     administeredDate: dateString.optional(),
     clinicId: id.optional(),
@@ -61,6 +64,27 @@ export const schemas = {
     expiryDate: dateString,
     quantity: z.number().int().positive().max(100000),
   }),
+  createUser: z
+    .object({
+      role: z.enum(['NURSE', 'PARENT']),
+      fullName: z.string().trim().min(1).max(100).optional(),
+      clinicId: id.optional(),
+      guardianId: id.optional(),
+      username: z.string().trim().regex(/^[A-Za-z0-9_.-]{3,40}$/, 'use 3-40 letters, digits, dot, dash or underscore').optional(),
+    })
+    .superRefine((v, ctx) => {
+      const need = (cond, path, message) => cond && ctx.addIssue({ code: 'custom', path: [path], message });
+      need(v.role === 'NURSE' && !v.fullName, 'fullName', 'is required for a nurse');
+      need(v.role === 'NURSE' && !v.clinicId, 'clinicId', 'is required for a nurse');
+      need(v.role === 'PARENT' && !v.guardianId, 'guardianId', 'is required for a parent login');
+    }),
+  updateNewborn: z.object({
+    name: z.string().trim().min(1).max(100),
+    gender: z.enum(['M', 'F', 'O']),
+    dob: dateString,
+    birthWeightKg: z.number().min(0.5).max(9.99).nullable().optional(),
+  }),
+  deleteNewborn: z.object({ restoreStock: z.enum(['0', '1']).optional() }),
   dashboardQuery: z.object({
     clinicId: id.optional(),
     days: z.coerce.number().int().min(0).max(365).default(7),

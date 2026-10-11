@@ -12,6 +12,8 @@ export const config = {
   corsOrigin: process.env.CORS_ORIGIN || 'http://localhost:5173',
   jwtSecret: process.env.JWT_SECRET,
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || '8h',
+  // development convenience: the sign-in page lists every account. Keep this off in production.
+  demoLogins: process.env.DEMO_LOGINS === 'true',
   db: {
     user: process.env.DB_USER,
     password: process.env.DB_PASSWORD,

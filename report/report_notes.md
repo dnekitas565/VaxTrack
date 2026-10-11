@@ -114,7 +114,7 @@ demo data only. **Core** figures are the ones the marking rubric asks for (verif
 | 33 | fig_33_audit_log_ui.png | Admin audit log showing who changed the dose and when | Front-End | UI: journey step 9 | Core | | todo |
 | 34 | fig_34_phone_dashboard.png | Dashboard at phone width | Front-End | Browser device mode 390 px, or a real phone | Core | | todo |
 | 35 | fig_35_phone_menu_dark.png | Phone menu in dark mode | Front-End | As 34: open the menu and switch to dark | Optional | | todo |
-| 36 | fig_36_test_log.png | test_log: all 20 test cases PASS | Verification and Testing | Terminal: end of `11_tests.sql` (also at the end of run_all) | Core | | todo |
+| 36 | fig_36_test_log.png | test_log: all 31 test cases PASS | Verification and Testing | Terminal: end of `11_tests.sql` (also at the end of run_all) | Core | | todo |
 | 37 | fig_37_tc_p4.png | TC-P4 close-up: DONE and stock decremented by exactly one | Verification and Testing | Crop of fig_36 | Core | | todo |
 | 38 | fig_38_tc_p6.png | TC-P6 close-up: out-of-stock rolls back | Verification and Testing | Crop of fig_36 | Core | | todo |
 | 39 | fig_39_tc_p8.png | TC-P8 close-up: late dose flag and alert | Verification and Testing | Crop of fig_36 | Core | | todo |
@@ -124,10 +124,16 @@ demo data only. **Core** figures are the ones the marking rubric asks for (verif
 | 43 | fig_43_api_administer.png | API: administer a dose | Verification and Testing | REST Client, "Mark the birth dose administered" | Core | | todo |
 | 44 | fig_44_api_out_of_stock.png | API: out of stock returns 409 with a clear message | Verification and Testing | REST Client, the Vitamin A request as nurse2 | Core | | todo |
 | 45 | fig_45_api_forbidden.png | API: a parent calling a staff route gets 403 | Verification and Testing | REST Client, "FAIL: parent" under Dashboard | Core | | todo |
-| 46 | fig_46_npm_smoke.png | npm run smoke: 89 of 89 checks | Verification and Testing | Terminal: `cd api; npm run smoke` (demo seed loaded) | Core | | todo |
+| 46 | fig_46_npm_smoke.png | npm run smoke: 152 of 152 checks | Verification and Testing | Terminal: `cd api; npm run smoke` (demo seed loaded) | Core | | todo |
 | 47 | fig_47_authz_matrix.png | npm run authz: role by route matrix and token checks | Verification and Testing | Terminal: `cd api; npm run authz` | Optional | | todo |
 | 48 | fig_48_lighthouse_dashboard.png | Lighthouse accessibility score for the dashboard (production build) | Results and Discussion | Edge DevTools, Lighthouse, Accessibility only, on `npm run preview` | Core | | todo |
 | 49 | fig_49_lighthouse_dark.png | Lighthouse accessibility score in dark mode | Results and Discussion | Same, with the dark theme selected | Optional | | todo |
+| 51 | fig_51_users_page.png | Admin Users page: every login, with the add-nurse and add-parent-login actions | Front-End | UI: sign in as admin, sidebar Users | Optional | | todo |
+| 52 | fig_52_signin_directory.png | Sign-in page with the live login directory and the show-password toggle | Front-End | UI: sign-in page, click an account (fills and reveals the password) | Core | | todo |
+| 53 | fig_53_parent_login_created.png | Parent login created automatically when a baby is registered | Front-End | UI: journey step 3, below the schedule banner | Core | | todo |
+| 54 | fig_54_edit_newborn.png | Administrator edit dialog: correcting a date of birth | Front-End | UI: journey step 8c | Optional | | todo |
+| 55 | fig_55_delete_newborn.png | Administrator delete confirmation (type the name, optional stock return) | Front-End | UI: journey step 8c | Optional | | todo |
+| 56 | fig_56_phone_known_guardian.png | Register form: the phone number belongs to a registered guardian (yes/no only, guardian fields disabled) | Front-End | UI: journey step 3, type 9876500001 into Phone | Optional | | todo |
 | 50 | fig_50_ui_out_of_stock.png | Mark administered dialog when the clinic has no stock (Confirm disabled) | Front-End | UI: journey step 7 | Optional | | todo |
 
 Appendix material (no figure number): `report/run_all.log` (full clean-state log), `report/test_cases_table.md` (test table), `report/frontend_map.md` (page, endpoint and package table),

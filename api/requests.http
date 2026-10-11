@@ -417,5 +417,87 @@ Authorization: Bearer {{admin}}
 GET {{host}}/audit
 Authorization: Bearer {{nurse1}}
 
+############################################################ EDIT / DELETE A NEWBORN  (ADMIN only)
+### Correct name, gender, date of birth and weight (use a baby id from the register response) -> 200
+### Every dose that is not DONE moves with the date of birth. 409 if a given dose would fall before its minimum age.
+PATCH {{host}}/newborns/{{babyId}}
+Authorization: Bearer {{admin}}
+Content-Type: application/json
+
+{ "name": "Http Baby Fixed", "gender": "F", "dob": "2026-10-01", "birthWeightKg": 3.2 }
+
+### FAIL: a nurse cannot edit -> 403
+PATCH {{host}}/newborns/{{babyId}}
+Authorization: Bearer {{nurse1}}
+Content-Type: application/json
+
+{ "name": "X", "gender": "F", "dob": "2026-10-01" }
+
+### FAIL: future date of birth -> 422
+PATCH {{host}}/newborns/{{babyId}}
+Authorization: Bearer {{admin}}
+Content-Type: application/json
+
+{ "name": "X", "gender": "F", "dob": "2030-01-01" }
+
+### Delete a newborn; restoreStock=1 puts the given doses back into stock -> 200
+DELETE {{host}}/newborns/{{babyId}}?restoreStock=1
+Authorization: Bearer {{admin}}
+
+### FAIL: a nurse cannot delete -> 403
+DELETE {{host}}/newborns/{{babyId}}
+Authorization: Bearer {{nurse1}}
+
+############################################################ USERS and LOGINS  (ADMIN)
+### Registering a baby (above) also creates the guardian's parent login: look at "parent_login" in that response
+### ({ username: <made from the guardian's name, e.g. priya.sharma>, password: "Parent@123", created: true }).
+### A second child of the same guardian (same phone; the guardian name may be left out) returns { created: false }
+### and nothing else: an existing login is never revealed here.
+
+### Does this phone number already belong to a guardian? -> { "exists": true|false } and nothing else (ADMIN, NURSE; 30 a minute)
+GET {{host}}/newborns/guardian-lookup?phone=9876500001
+Authorization: Bearer {{nurse1}}
+
+### FAIL: a parent may not use it -> 403
+GET {{host}}/newborns/guardian-lookup?phone=9876500001
+Authorization: Bearer {{parent1}}
+
+### Every account with its password -> 200
+# @name users
+GET {{host}}/users
+Authorization: Bearer {{admin}}
+
+### Data for the add-account forms: clinics and guardians who have no login -> 200
+GET {{host}}/users/options
+Authorization: Bearer {{admin}}
+
+### Add a nurse (clinicId 4 = Sunrise in a fresh seed; take the id from GET /clinics) -> 201, username nurseN, password Nurse@123
+POST {{host}}/users
+Authorization: Bearer {{admin}}
+Content-Type: application/json
+
+{ "role": "NURSE", "fullName": "Http Nurse", "clinicId": 4 }
+
+### FAIL: a nurse account needs a clinic -> 400
+POST {{host}}/users
+Authorization: Bearer {{admin}}
+Content-Type: application/json
+
+{ "role": "NURSE", "fullName": "No Clinic" }
+
+### FAIL: username already taken (any capitalisation) -> 409
+POST {{host}}/users
+Authorization: Bearer {{admin}}
+Content-Type: application/json
+
+{ "role": "NURSE", "fullName": "Dup", "clinicId": 4, "username": "NURSE1" }
+
+### FAIL: a nurse cannot manage accounts -> 403
+GET {{host}}/users
+Authorization: Bearer {{nurse1}}
+
+### Development login directory (only when DEMO_LOGINS=true in api/.env; no token) -> 200
+GET {{host}}/auth/demo-logins
+
 ### Liveness (no token)
 GET {{host}}/health

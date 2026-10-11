@@ -56,12 +56,13 @@ END trg_dose_status_guard;
 SHOW ERRORS TRIGGER trg_dose_status_guard
 
 -- ----------------------------------------------------------------------------
--- trg_dose_alerts : OVERDUE alert when a dose becomes OVERDUE, once per dose record
+-- trg_dose_alerts : OVERDUE alert when a dose becomes OVERDUE (or an overdue dose gets a new
+-- date after a date-of-birth correction), once per dose record
 -- ----------------------------------------------------------------------------
 CREATE OR REPLACE TRIGGER trg_dose_alerts
 AFTER UPDATE OF status ON dose_records
 FOR EACH ROW
-WHEN (NEW.status = 'OVERDUE' AND OLD.status <> 'OVERDUE')
+WHEN (NEW.status = 'OVERDUE' AND (OLD.status <> 'OVERDUE' OR OLD.scheduled_date <> NEW.scheduled_date))
 BEGIN
   INSERT INTO alerts (baby_id, record_id, clinic_id, alert_type, message)
   SELECT n.baby_id, :NEW.record_id, n.clinic_id, 'OVERDUE',

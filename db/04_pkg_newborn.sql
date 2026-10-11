@@ -21,6 +21,11 @@
 --   -20014 invalid input
 --   -20015 clinic not found
 --   -20016 user not found
+--   -20017 guardian already has a login (account_pkg)
+--   -20018 username already taken (account_pkg)
+--   -20019 invalid account data (account_pkg)
+--   -20020 date of birth cannot change: a dose already given would fall before its minimum age
+--   -20021 only an administrator may change or delete a newborn record
 --   -20099 unexpected error (original Oracle message is appended)
 --
 -- TRANSACTIONS
@@ -28,6 +33,9 @@
 --   refresh_overdue_status are complete units of work: each sets a SAVEPOINT,
 --   COMMITs on success and ROLLBACKs TO the savepoint on any failure.
 --   generate_schedule does NOT commit (it is a building block of register_newborn).
+--
+-- register_newborn creates the guardian's parent login through account_pkg (file 03b), which
+--   therefore has to exist first.
 --
 -- NOTE: the first statement below creates the vaccine_inventory_pkg SPEC so this
 --   file compiles before 05_pkg_inventory.sql runs. It is a copy of the spec in
@@ -80,6 +88,8 @@ CREATE OR REPLACE PACKAGE newborn_vaccination_pkg AS
   c_err_invalid_input   CONSTANT PLS_INTEGER := -20014;
   c_err_clinic_missing  CONSTANT PLS_INTEGER := -20015;
   c_err_user_missing    CONSTANT PLS_INTEGER := -20016;
+  c_err_dob_conflict    CONSTANT PLS_INTEGER := -20020;
+  c_err_not_admin       CONSTANT PLS_INTEGER := -20021;
   c_err_unexpected      CONSTANT PLS_INTEGER := -20099;
 
   -- Record who is acting; the audit trigger reads it from CLIENT_INFO.
@@ -108,6 +118,31 @@ CREATE OR REPLACE PACKAGE newborn_vaccination_pkg AS
     p_baby_id          OUT NUMBER
   );
 
+  -- Same, and also creates the guardian's PARENT login when the guardian has none yet:
+  -- username from the guardian's name (account_pkg.suggest_username), password hash supplied by
+  -- the API. p_parent_username is NULL when no new login was needed (guardian already had one,
+  -- or p_parent_hash is NULL). p_guardian_name and p_guardian_address may be NULL when the phone number belongs to a
+  -- known guardian: the stored guardian details are kept and the given ones are ignored.
+  PROCEDURE register_newborn (
+    p_guardian_name    IN  VARCHAR2,
+    p_guardian_phone   IN  VARCHAR2,
+    p_guardian_email   IN  VARCHAR2,
+    p_guardian_address IN  VARCHAR2,
+    p_baby_name        IN  VARCHAR2,
+    p_gender           IN  VARCHAR2,
+    p_dob              IN  DATE,
+    p_birth_weight_kg  IN  NUMBER,
+    p_clinic_id        IN  NUMBER,
+    p_include_regional IN  VARCHAR2,
+    p_baby_id          OUT NUMBER,
+    p_parent_hash      IN  VARCHAR2,
+    p_parent_username  OUT VARCHAR2
+  );
+
+  -- 'Y' when a guardian is registered with this phone number, else 'N'. Same matching rule as
+  -- register_newborn, so a form can tell the nurse beforehand what the save will do.
+  FUNCTION guardian_exists (p_phone IN VARCHAR2) RETURN VARCHAR2;
+
   -- 'Y' when the baby is old enough (age >= min_age_days) for the dose, else 'N'.
   FUNCTION is_dose_allowed (p_record_id IN NUMBER) RETURN VARCHAR2;
 
@@ -130,6 +165,27 @@ CREATE OR REPLACE PACKAGE newborn_vaccination_pkg AS
 
   -- Touch every PENDING dose whose date has passed so the guard trigger flips it to OVERDUE.
   PROCEDURE refresh_overdue_status;
+
+  -- ADMIN ONLY. Correct a newborn's details. A changed date of birth moves the due date of every
+  -- dose that is not DONE; doses already given keep their date, and the change is refused (-20020)
+  -- if one of them would fall before its minimum age. Late flags and stale alerts are recalculated.
+  PROCEDURE update_newborn (
+    p_baby_id         IN NUMBER,
+    p_baby_name       IN VARCHAR2,
+    p_gender          IN VARCHAR2,
+    p_dob             IN DATE,
+    p_birth_weight_kg IN NUMBER,
+    p_user_id         IN NUMBER
+  );
+
+  -- ADMIN ONLY. Delete a newborn with its doses and alerts. p_restore_stock = 'Y' puts the vaccine
+  -- doses that were recorded as given back into stock (use it when the record was a mistake).
+  -- The guardian and the guardian's login are kept.
+  PROCEDURE delete_newborn (
+    p_baby_id       IN NUMBER,
+    p_user_id       IN NUMBER,
+    p_restore_stock IN VARCHAR2 DEFAULT 'N'
+  );
 END newborn_vaccination_pkg;
 /
 SHOW ERRORS PACKAGE newborn_vaccination_pkg
@@ -204,9 +260,15 @@ CREATE OR REPLACE PACKAGE BODY newborn_vaccination_pkg AS
     p_birth_weight_kg  IN  NUMBER,
     p_clinic_id        IN  NUMBER,
     p_include_regional IN  VARCHAR2,
-    p_baby_id          OUT NUMBER
+    p_baby_id          OUT NUMBER,
+    p_parent_hash      IN  VARCHAR2,
+    p_parent_username  OUT VARCHAR2
   ) IS
     v_guardian_id guardians.guardian_id%TYPE;
+    v_login_count PLS_INTEGER;
+    v_uid         NUMBER;
+    v_gname       guardians.full_name%TYPE;
+    v_username    app_users.username%TYPE;
     v_baby_id     newborns.baby_id%TYPE;
     v_phone       guardians.phone%TYPE := TRIM(p_guardian_phone);
     v_count       PLS_INTEGER;
@@ -215,10 +277,11 @@ CREATE OR REPLACE PACKAGE BODY newborn_vaccination_pkg AS
   BEGIN
     SAVEPOINT sp_register;
     p_baby_id := NULL;
+    p_parent_username := NULL;
 
     -- input validation
-    IF TRIM(p_baby_name) IS NULL OR TRIM(p_guardian_name) IS NULL THEN
-      RAISE_APPLICATION_ERROR(c_err_invalid_input, 'Baby name and guardian name are required');
+    IF TRIM(p_baby_name) IS NULL THEN
+      RAISE_APPLICATION_ERROR(c_err_invalid_input, 'Baby name is required');
     END IF;
     IF v_phone IS NULL OR NOT REGEXP_LIKE(v_phone, '^[0-9+ -]{7,15}$') THEN
       RAISE_APPLICATION_ERROR(c_err_invalid_input, 'Guardian phone must be 7-15 digits');
@@ -234,11 +297,17 @@ CREATE OR REPLACE PACKAGE BODY newborn_vaccination_pkg AS
       RAISE_APPLICATION_ERROR(c_err_clinic_missing, 'Clinic not found: ' || NVL(TO_CHAR(p_clinic_id), 'NULL'));
     END IF;
 
-    -- guardian: reuse by phone, else insert
+    -- guardian: reuse by phone, else insert (a new guardian needs a name)
     BEGIN
       SELECT guardian_id INTO v_guardian_id FROM guardians WHERE phone = v_phone;
     EXCEPTION
       WHEN NO_DATA_FOUND THEN
+        IF TRIM(p_guardian_name) IS NULL THEN
+          RAISE_APPLICATION_ERROR(c_err_invalid_input, 'Guardian name is required for a new guardian');
+        END IF;
+        IF TRIM(p_guardian_address) IS NULL THEN
+          RAISE_APPLICATION_ERROR(c_err_invalid_input, 'Guardian address is required for a new guardian');
+        END IF;
         INSERT INTO guardians (full_name, phone, email, address)
         VALUES (TRIM(p_guardian_name), v_phone, TRIM(p_guardian_email), TRIM(p_guardian_address))
         RETURNING guardian_id INTO v_guardian_id;
@@ -251,6 +320,17 @@ CREATE OR REPLACE PACKAGE BODY newborn_vaccination_pkg AS
 
     generate_schedule(v_baby_id, p_include_regional);
 
+    -- every guardian gets a login (once): username from the name, same transaction as the baby
+    IF p_parent_hash IS NOT NULL THEN
+      SELECT COUNT(*) INTO v_login_count FROM app_users WHERE guardian_id = v_guardian_id;
+      IF v_login_count = 0 THEN
+        SELECT full_name INTO v_gname FROM guardians WHERE guardian_id = v_guardian_id;
+        v_username := account_pkg.suggest_username(v_gname);
+        account_pkg.add_user(v_username, p_parent_hash, 'PARENT', v_gname, NULL, v_guardian_id, v_uid);
+        p_parent_username := v_username;
+      END IF;
+    END IF;
+
     COMMIT;
     p_baby_id := v_baby_id;
   EXCEPTION
@@ -259,11 +339,41 @@ CREATE OR REPLACE PACKAGE BODY newborn_vaccination_pkg AS
       v_msg  := SQLERRM;
       ROLLBACK TO sp_register;
       p_baby_id := NULL;
+      p_parent_username := NULL;
       IF v_code BETWEEN -20999 AND -20000 THEN
         RAISE;
       END IF;
       RAISE_APPLICATION_ERROR(c_err_unexpected, 'Registration failed: ' || v_msg);
   END register_newborn;
+
+  -- original signature: registers without creating a login
+  PROCEDURE register_newborn (
+    p_guardian_name    IN  VARCHAR2,
+    p_guardian_phone   IN  VARCHAR2,
+    p_guardian_email   IN  VARCHAR2,
+    p_guardian_address IN  VARCHAR2,
+    p_baby_name        IN  VARCHAR2,
+    p_gender           IN  VARCHAR2,
+    p_dob              IN  DATE,
+    p_birth_weight_kg  IN  NUMBER,
+    p_clinic_id        IN  NUMBER,
+    p_include_regional IN  VARCHAR2,
+    p_baby_id          OUT NUMBER
+  ) IS
+    v_no_login VARCHAR2(60);
+  BEGIN
+    register_newborn(p_guardian_name, p_guardian_phone, p_guardian_email, p_guardian_address,
+                     p_baby_name, p_gender, p_dob, p_birth_weight_kg, p_clinic_id, p_include_regional,
+                     p_baby_id, NULL, v_no_login);
+  END register_newborn;
+
+  -- --------------------------------------------------------- guardian_exists
+  FUNCTION guardian_exists (p_phone IN VARCHAR2) RETURN VARCHAR2 IS
+    v_count PLS_INTEGER;
+  BEGIN
+    SELECT COUNT(*) INTO v_count FROM guardians WHERE phone = TRIM(p_phone);
+    RETURN CASE WHEN v_count > 0 THEN 'Y' ELSE 'N' END;
+  END guardian_exists;
 
   -- ----------------------------------------------------------- is_dose_allowed
   FUNCTION is_dose_allowed (p_record_id IN NUMBER) RETURN VARCHAR2 IS
@@ -504,6 +614,185 @@ CREATE OR REPLACE PACKAGE BODY newborn_vaccination_pkg AS
       END IF;
       RAISE_APPLICATION_ERROR(c_err_unexpected, 'Overdue refresh failed: ' || v_msg);
   END refresh_overdue_status;
+
+
+  -- ================================================================== admin tools
+  -- private: only an ADMIN account may use update_newborn / delete_newborn
+  PROCEDURE require_admin (p_user_id IN NUMBER) IS
+    v_role app_users.role%TYPE;
+  BEGIN
+    SELECT role INTO v_role FROM app_users WHERE user_id = p_user_id;
+    IF v_role <> 'ADMIN' THEN
+      RAISE_APPLICATION_ERROR(c_err_not_admin, 'Only an administrator can change or delete a newborn record');
+    END IF;
+  EXCEPTION
+    WHEN NO_DATA_FOUND THEN
+      RAISE_APPLICATION_ERROR(c_err_not_admin, 'Only an administrator can change or delete a newborn record');
+  END require_admin;
+
+  -- one-line description of a newborn row, used in the audit log
+  FUNCTION newborn_text (p_name VARCHAR2, p_gender VARCHAR2, p_dob DATE, p_weight NUMBER) RETURN VARCHAR2 IS
+  BEGIN
+    RETURN 'name=' || p_name || '; gender=' || p_gender || '; dob=' || TO_CHAR(p_dob, 'YYYY-MM-DD')
+           || '; weight=' || NVL(TO_CHAR(p_weight), '-');
+  END newborn_text;
+
+  -- --------------------------------------------------------------- update_newborn
+  PROCEDURE update_newborn (
+    p_baby_id         IN NUMBER,
+    p_baby_name       IN VARCHAR2,
+    p_gender          IN VARCHAR2,
+    p_dob             IN DATE,
+    p_birth_weight_kg IN NUMBER,
+    p_user_id         IN NUMBER
+  ) IS
+    v_old     newborns%ROWTYPE;
+    v_new_dob DATE;
+    v_old_text VARCHAR2(500);
+    v_new_text VARCHAR2(500);
+    v_actor   audit_log.changed_by%TYPE;
+    v_code    PLS_INTEGER;
+    v_msg     VARCHAR2(4000);
+  BEGIN
+    SAVEPOINT sp_update_newborn;
+    require_admin(p_user_id);
+    set_actor(p_user_id);
+
+    IF TRIM(p_baby_name) IS NULL OR p_gender IS NULL OR UPPER(p_gender) NOT IN ('M', 'F', 'O') OR p_dob IS NULL
+       OR (p_birth_weight_kg IS NOT NULL AND p_birth_weight_kg NOT BETWEEN 0.5 AND 9.99) THEN
+      RAISE_APPLICATION_ERROR(c_err_invalid_input, 'Name, gender (M, F or O) and date of birth are required; weight must be 0.5 to 9.99 kg');
+    END IF;
+
+    BEGIN
+      SELECT * INTO v_old FROM newborns WHERE baby_id = p_baby_id FOR UPDATE;
+    EXCEPTION
+      WHEN NO_DATA_FOUND THEN
+        RAISE_APPLICATION_ERROR(c_err_baby_missing, 'Baby not found: ' || NVL(TO_CHAR(p_baby_id), 'NULL'));
+    END;
+    v_new_dob := TRUNC(p_dob);
+
+    IF v_new_dob <> TRUNC(v_old.date_of_birth) THEN
+      -- doses already given must stay valid under the new date of birth
+      FOR r IN (SELECT dose_label(v.vaccine_name, v.dose_number) AS label, d.administered_date, v.min_age_days
+                  FROM dose_records d JOIN vaccine_master v ON v.vaccine_id = d.vaccine_id
+                 WHERE d.baby_id = p_baby_id AND d.status = 'DONE'
+                   AND d.administered_date - v_new_dob < v.min_age_days
+                 ORDER BY d.administered_date) LOOP
+        RAISE_APPLICATION_ERROR(c_err_dob_conflict,
+          r.label || ' was given on ' || TO_CHAR(r.administered_date, 'YYYY-MM-DD')
+          || ', which is before its minimum age (day ' || r.min_age_days || ') under the new date of birth');
+      END LOOP;
+    END IF;
+
+    -- trg_newborn_dob_check rejects a future date (-20003)
+    UPDATE newborns
+       SET full_name = TRIM(p_baby_name), gender = UPPER(p_gender),
+           date_of_birth = v_new_dob, birth_weight_kg = p_birth_weight_kg
+     WHERE baby_id = p_baby_id;
+
+    IF v_new_dob <> TRUNC(v_old.date_of_birth) THEN
+      -- overdue / due-soon alerts of unfinished doses describe the old dates: drop them,
+      -- the status guard and alert trigger raise fresh ones for doses that are overdue now
+      DELETE FROM alerts
+       WHERE baby_id = p_baby_id AND alert_type IN ('OVERDUE', 'DUE_SOON')
+         AND record_id IN (SELECT record_id FROM dose_records WHERE baby_id = p_baby_id AND status <> 'DONE');
+
+      UPDATE dose_records d
+         SET scheduled_date = v_new_dob + (SELECT v.due_age_days FROM vaccine_master v WHERE v.vaccine_id = d.vaccine_id),
+             status = 'PENDING'
+       WHERE d.baby_id = p_baby_id AND d.status <> 'DONE';
+
+      -- late flags of given doses depend on the age at the time they were given
+      UPDATE dose_records d
+         SET is_late = CASE WHEN d.administered_date - v_new_dob >
+                                 (SELECT v.max_age_days FROM vaccine_master v WHERE v.vaccine_id = d.vaccine_id)
+                            THEN 'Y' ELSE 'N' END
+       WHERE d.baby_id = p_baby_id AND d.status = 'DONE';
+
+      DELETE FROM alerts WHERE baby_id = p_baby_id AND alert_type = 'LATE_DOSE';
+      INSERT INTO alerts (baby_id, record_id, clinic_id, alert_type, message)
+      SELECT d.baby_id, d.record_id, n.clinic_id, 'LATE_DOSE',
+             dose_label(v.vaccine_name, v.dose_number) || ' for ' || n.full_name || ' was given late (day '
+             || (d.administered_date - v_new_dob) || ', recommended by day ' || v.max_age_days || ')'
+        FROM dose_records d
+        JOIN newborns n       ON n.baby_id = d.baby_id
+        JOIN vaccine_master v ON v.vaccine_id = d.vaccine_id
+       WHERE d.baby_id = p_baby_id AND d.status = 'DONE' AND d.is_late = 'Y';
+    END IF;
+
+    v_actor := NVL(SYS_CONTEXT('USERENV', 'CLIENT_INFO'), SYS_CONTEXT('USERENV', 'SESSION_USER'));
+    v_old_text := newborn_text(v_old.full_name, v_old.gender, v_old.date_of_birth, v_old.birth_weight_kg);
+    v_new_text := newborn_text(TRIM(p_baby_name), UPPER(p_gender), v_new_dob, p_birth_weight_kg);
+    INSERT INTO audit_log (table_name, record_id, action, old_value, new_value, changed_by)
+    VALUES ('NEWBORNS', p_baby_id, 'UPDATE', v_old_text, v_new_text, v_actor);
+    COMMIT;
+  EXCEPTION
+    WHEN OTHERS THEN
+      v_code := SQLCODE;
+      v_msg  := SQLERRM;
+      ROLLBACK TO sp_update_newborn;
+      IF v_code BETWEEN -20999 AND -20000 THEN
+        RAISE;
+      END IF;
+      RAISE_APPLICATION_ERROR(c_err_unexpected, 'Could not update the newborn: ' || v_msg);
+  END update_newborn;
+
+  -- --------------------------------------------------------------- delete_newborn
+  PROCEDURE delete_newborn (
+    p_baby_id       IN NUMBER,
+    p_user_id       IN NUMBER,
+    p_restore_stock IN VARCHAR2 DEFAULT 'N'
+  ) IS
+    v_old    newborns%ROWTYPE;
+    v_text   VARCHAR2(500);
+    v_given  PLS_INTEGER;
+    v_actor  audit_log.changed_by%TYPE;
+    v_code   PLS_INTEGER;
+    v_msg    VARCHAR2(4000);
+  BEGIN
+    SAVEPOINT sp_delete_newborn;
+    require_admin(p_user_id);
+    set_actor(p_user_id);
+
+    BEGIN
+      SELECT * INTO v_old FROM newborns WHERE baby_id = p_baby_id FOR UPDATE;
+    EXCEPTION
+      WHEN NO_DATA_FOUND THEN
+        RAISE_APPLICATION_ERROR(c_err_baby_missing, 'Baby not found: ' || NVL(TO_CHAR(p_baby_id), 'NULL'));
+    END;
+
+    SELECT COUNT(*) INTO v_given FROM dose_records WHERE baby_id = p_baby_id AND status = 'DONE';
+
+    IF UPPER(p_restore_stock) = 'Y' THEN
+      UPDATE vaccine_inventory i
+         SET quantity = quantity + (SELECT COUNT(*) FROM dose_records d
+                                     WHERE d.baby_id = p_baby_id AND d.status = 'DONE' AND d.inventory_id = i.inventory_id)
+       WHERE i.inventory_id IN (SELECT d.inventory_id FROM dose_records d
+                                 WHERE d.baby_id = p_baby_id AND d.status = 'DONE' AND d.inventory_id IS NOT NULL);
+    END IF;
+
+    DELETE FROM alerts WHERE baby_id = p_baby_id;
+    DELETE FROM dose_records WHERE baby_id = p_baby_id;   -- trg_dose_audit logs each deleted dose
+    DELETE FROM newborns WHERE baby_id = p_baby_id;
+
+    v_actor := NVL(SYS_CONTEXT('USERENV', 'CLIENT_INFO'), SYS_CONTEXT('USERENV', 'SESSION_USER'));
+    v_text := newborn_text(v_old.full_name, v_old.gender, v_old.date_of_birth, v_old.birth_weight_kg)
+              || '; doses given=' || v_given;
+    INSERT INTO audit_log (table_name, record_id, action, old_value, new_value, changed_by)
+    VALUES ('NEWBORNS', p_baby_id, 'DELETE', v_text,
+            CASE WHEN UPPER(p_restore_stock) = 'Y' THEN 'stock restored' ELSE 'stock not restored' END,
+            v_actor);
+    COMMIT;
+  EXCEPTION
+    WHEN OTHERS THEN
+      v_code := SQLCODE;
+      v_msg  := SQLERRM;
+      ROLLBACK TO sp_delete_newborn;
+      IF v_code BETWEEN -20999 AND -20000 THEN
+        RAISE;
+      END IF;
+      RAISE_APPLICATION_ERROR(c_err_unexpected, 'Could not delete the newborn: ' || v_msg);
+  END delete_newborn;
 
 END newborn_vaccination_pkg;
 /

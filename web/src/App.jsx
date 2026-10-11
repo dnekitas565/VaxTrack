@@ -16,6 +16,7 @@ const Alerts = lazy(() => import('./pages/Alerts.jsx'));
 const Reports = lazy(() => import('./pages/Reports.jsx'));
 const VaccinationCard = lazy(() => import('./pages/VaccinationCard.jsx'));
 const AuditLog = lazy(() => import('./pages/AuditLog.jsx'));
+const Users = lazy(() => import('./pages/Users.jsx'));
 
 const homeFor = (user) => (user.role === 'PARENT' ? '/newborns' : '/');
 
@@ -45,6 +46,7 @@ export default function App() {
           <Route path="alerts" element={<Protected roles={STAFF}><Alerts /></Protected>} />
           <Route path="reports" element={<Protected roles={STAFF}><Reports /></Protected>} />
           <Route path="audit" element={<Protected roles={['ADMIN']}><AuditLog /></Protected>} />
+          <Route path="users" element={<Protected roles={['ADMIN']}><Users /></Protected>} />
           <Route path="*" element={<NotFound />} />
         </Route>
       </Routes>

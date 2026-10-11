@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { BarChart3, Baby, Bell, LayoutDashboard, LogOut, Menu, Package, ScrollText, Syringe, UserPlus, X } from 'lucide-react';
+import { BarChart3, Baby, Bell, LayoutDashboard, LogOut, Menu, Package, ScrollText, Syringe, UserCog, UserPlus, X } from 'lucide-react';
 import { api } from '../api.js';
 import { useAuth, canManage } from '../auth.jsx';
 import { ROLE_LABEL } from '../lib/format.js';
@@ -11,7 +11,10 @@ import { Avatar } from './ui.jsx';
 function sectionsFor(user) {
   if (user.role === 'PARENT') return [{ title: null, items: [{ to: '/newborns', label: 'My children', icon: Baby }] }];
   const insights = [{ to: '/reports', label: 'Reports', icon: BarChart3 }];
-  if (user.role === 'ADMIN') insights.push({ to: '/audit', label: 'Audit log', icon: ScrollText });
+  if (user.role === 'ADMIN') {
+    insights.push({ to: '/users', label: 'Users', icon: UserCog });
+    insights.push({ to: '/audit', label: 'Audit log', icon: ScrollText });
+  }
   return [
     {
       title: 'Clinic',

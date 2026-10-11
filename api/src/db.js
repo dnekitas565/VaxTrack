@@ -35,6 +35,7 @@ export const num = (v) => ({ val: v ?? null, type: oracledb.NUMBER });
 /** VARCHAR2 bind that may be null */
 export const str = (v) => ({ val: v ?? null, type: oracledb.STRING });
 export const outNum = () => ({ dir: oracledb.BIND_OUT, type: oracledb.NUMBER });
+export const outStr = (maxSize = 200) => ({ dir: oracledb.BIND_OUT, type: oracledb.STRING, maxSize });
 
 const lowerKeys = (rows) =>
   rows.map((r) => Object.fromEntries(Object.entries(r).map(([k, v]) => [k.toLowerCase(), v])));

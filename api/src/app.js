@@ -11,6 +11,7 @@ import doseRoutes from './routes/doses.js';
 import inventoryRoutes from './routes/inventory.js';
 import alertRoutes from './routes/alerts.js';
 import reportRoutes from './routes/reports.js';
+import userRoutes from './routes/users.js';
 
 export function createApp() {
   const app = express();
@@ -36,6 +37,7 @@ export function createApp() {
   app.use('/doses', doseRoutes);
   app.use('/inventory', inventoryRoutes);
   app.use('/alerts', alertRoutes);
+  app.use('/users', userRoutes);
   app.use(reportRoutes); // /reports/clinic-coverage, /audit, /clinics, /vaccines
 
   app.use(notFound);

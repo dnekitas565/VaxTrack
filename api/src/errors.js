@@ -25,6 +25,11 @@ const STATUS_BY_ORA = {
   20014: 400, // invalid input
   20015: 404, // clinic not found
   20016: 400, // user not found
+  20017: 409, // guardian already has a login
+  20018: 409, // username already taken
+  20019: 400, // invalid account data
+  20020: 409, // date of birth conflicts with a dose already given
+  20021: 403, // only an administrator may change or delete a newborn
 };
 
 // ORA-0184x / 0185x / 0190x: malformed date or time value

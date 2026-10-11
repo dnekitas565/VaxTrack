@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Baby, CalendarCheck, CheckCircle2, Info, UserPlus, Users } from 'lucide-react';
-import { api } from '../api.js';
+import { Baby, CalendarCheck, CheckCircle2, Copy, KeyRound, UserPlus, Users } from 'lucide-react';
+import { api, qs } from '../api.js';
 import { useAuth } from '../auth.jsx';
 import Timeline from '../components/Timeline.jsx';
 import { Button, Card, Field, Notice, PageHeader, inputClass, linkButtonClass, useToast } from '../components/ui.jsx';
@@ -14,11 +14,15 @@ const EMPTY = {
   babyName: '', gender: '', dob: '', weight: '', clinicId: '', endemic: false,
 };
 
-function validate(f, isAdmin) {
+const PHONE_RE = /^[0-9+ -]{7,15}$/;
+
+// guardianKnown: the phone number belongs to a registered guardian, whose stored details are kept
+function validate(f, isAdmin, guardianKnown) {
   const e = {};
-  if (!f.guardianName.trim()) e.guardianName = 'Enter the guardian’s name.';
-  if (!/^[0-9+ -]{7,15}$/.test(f.guardianPhone.trim())) e.guardianPhone = 'Enter a phone number of 7 to 15 digits.';
-  if (f.guardianEmail && !/^\S+@\S+\.\S+$/.test(f.guardianEmail)) e.guardianEmail = 'Enter a valid email address or leave it empty.';
+  if (!guardianKnown && !f.guardianName.trim()) e.guardianName = 'Enter the guardian’s name.';
+  if (!PHONE_RE.test(f.guardianPhone.trim())) e.guardianPhone = 'Enter a phone number of 7 to 15 digits.';
+  if (!guardianKnown && !f.guardianAddress.trim()) e.guardianAddress = 'Enter the guardian’s address.';
+  if (!guardianKnown && f.guardianEmail && !/^\S+@\S+\.\S+$/.test(f.guardianEmail)) e.guardianEmail = 'Enter a valid email address or leave it empty.';
   if (!f.babyName.trim()) e.babyName = 'Enter the baby’s name.';
   if (!f.gender) e.gender = 'Choose a gender.';
   if (!f.dob) e.dob = 'Enter the date of birth.';
@@ -42,6 +46,70 @@ function FormSection({ icon: Icon, title, children }) {
   );
 }
 
+/** The guardian's login: shown right after registration so the nurse can hand it to the family */
+function ParentLoginCard({ login, guardianName }) {
+  const toast = useToast();
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(`Username: ${login.username}\nPassword: ${login.password ?? ''}`);
+      toast.success('Login details copied');
+    } catch {
+      toast.error('Could not copy. Select the text and copy it by hand.');
+    }
+  };
+  if (!login.created) {
+    return (
+      <Card className="mb-6 p-4 sm:p-5">
+        <div className="flex items-start gap-3">
+          <span className="rounded-xl bg-primary-soft p-2.5 text-primary-soft-ink">
+            <Users className="size-5" aria-hidden="true" />
+          </span>
+          <div>
+            <h2 className="text-base font-semibold text-ink">Added to an existing family</h2>
+            <p className="text-sm text-muted">
+              This guardian already has a parent login, so no new one was made. The parent signs in as usual and now sees this child as well.
+            </p>
+          </div>
+        </div>
+      </Card>
+    );
+  }
+  return (
+    <Card className="mb-6 p-4 sm:p-5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex items-start gap-3">
+          <span className="rounded-xl bg-primary-soft p-2.5 text-primary-soft-ink">
+            <KeyRound className="size-5" aria-hidden="true" />
+          </span>
+          <div>
+            <h2 className="text-base font-semibold text-ink">Parent login created</h2>
+            <p className="text-sm text-muted">{guardianName} can now sign in to see this child's schedule and print the vaccination card.</p>
+            <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
+              <dt className="text-muted">Username</dt>
+              <dd className="font-mono font-medium text-ink">{login.username}</dd>
+              <dt className="text-muted">Password</dt>
+              <dd className="font-mono font-medium text-ink">{login.password}</dd>
+            </dl>
+          </div>
+        </div>
+        <Button variant="secondary" size="sm" icon={Copy} onClick={copy}>
+          Copy login details
+        </Button>
+      </div>
+    </Card>
+  );
+}
+
+/** What the phone number means, without revealing anything about the guardian */
+function phoneHint(phone, lookup) {
+  if (!PHONE_RE.test(phone)) return 'Used to recognise a returning family and to name the parent login.';
+  if (lookup.pending) return 'Checking the phone number…';
+  if (lookup.failed) return 'Could not check this number. It is checked again when you register.';
+  return lookup.known
+    ? 'A guardian with this number is already registered. The baby will be added to that family and no new login is created.'
+    : 'New guardian. A parent login is created with the baby.';
+}
+
 export default function RegisterNewborn() {
   usePageTitle('Register newborn');
   const { user } = useAuth();
@@ -53,18 +121,43 @@ export default function RegisterNewborn() {
   const [formError, setFormError] = useState('');
   const [result, setResult] = useState(null);
 
+  // is the phone number already a registered guardian? (yes/no only; checked 0.4 s after typing stops)
+  const phone = form.guardianPhone.trim();
+  const [settledPhone, setSettledPhone] = useState('');
+  useEffect(() => {
+    const t = setTimeout(() => setSettledPhone(phone), 400);
+    return () => clearTimeout(t);
+  }, [phone]);
+  const lookupOn = PHONE_RE.test(phone) && settledPhone === phone;
+  const guardianLookup = useQuery({
+    queryKey: ['guardian-lookup', settledPhone],
+    queryFn: () => api.get(`/newborns/guardian-lookup${qs({ phone: settledPhone })}`),
+    enabled: lookupOn,
+    staleTime: 0,
+    gcTime: 0,
+    retry: false,
+  });
+  const known = lookupOn && guardianLookup.data?.exists === true;
+  const lookupState = {
+    known,
+    pending: PHONE_RE.test(phone) && (!lookupOn || guardianLookup.isFetching),
+    failed: guardianLookup.isError,
+  };
+
   const clinics = useQuery({ queryKey: ['clinics'], queryFn: () => api.get('/clinics'), enabled: isAdmin });
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value }));
 
   const register = useMutation({
     mutationFn: () =>
       api.post('/newborns', {
-        guardian: {
-          name: form.guardianName,
-          phone: form.guardianPhone,
-          ...(form.guardianEmail ? { email: form.guardianEmail } : {}),
-          ...(form.guardianAddress ? { address: form.guardianAddress } : {}),
-        },
+        guardian: known
+          ? { phone: form.guardianPhone }
+          : {
+              name: form.guardianName,
+              phone: form.guardianPhone,
+              ...(form.guardianEmail ? { email: form.guardianEmail } : {}),
+              ...(form.guardianAddress ? { address: form.guardianAddress } : {}),
+            },
         baby: {
           name: form.babyName,
           gender: form.gender,
@@ -75,10 +168,11 @@ export default function RegisterNewborn() {
         includeRegional: form.endemic,
       }),
     onSuccess: (data) => {
-      setResult({ ...data, name: form.babyName.trim() });
+      setResult({ ...data, name: form.babyName.trim(), guardianName: known ? '' : form.guardianName.trim() });
       toast.success(`${form.babyName.trim()} registered with ${data.timeline.length} scheduled doses`);
       queryClient.invalidateQueries({ queryKey: ['newborns'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+      queryClient.invalidateQueries({ queryKey: ['guardian-lookup'] });
     },
     onError: (err) => setFormError(err.message),
   });
@@ -86,7 +180,7 @@ export default function RegisterNewborn() {
   function submit(e) {
     e.preventDefault();
     setFormError('');
-    const found = validate(form, isAdmin);
+    const found = validate(form, isAdmin, known);
     setErrors(found);
     if (Object.keys(found).length === 0) register.mutate();
   }
@@ -117,6 +211,7 @@ export default function RegisterNewborn() {
             </Link>
           </div>
         </Card>
+        <ParentLoginCard login={result.parent_login} guardianName={result.guardianName} />
         <h2 className="sr-only">Generated vaccination schedule</h2>
         <Timeline rows={result.timeline} />
       </>
@@ -132,17 +227,17 @@ export default function RegisterNewborn() {
 
           <FormSection icon={Users} title="Guardian">
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <Field label="Full name" error={errors.guardianName}>
-                {(p) => <input {...p} className={inputClass} value={form.guardianName} onChange={set('guardianName')} autoComplete="off" />}
+              <Field label="Full name" error={known ? undefined : errors.guardianName} hint={known ? 'Not needed: the registered guardian’s details are kept.' : undefined}>
+                {(p) => <input {...p} className={inputClass} value={form.guardianName} onChange={set('guardianName')} autoComplete="off" disabled={known} />}
               </Field>
-              <Field label="Phone" error={errors.guardianPhone} hint="An existing guardian with this phone number is reused.">
+              <Field label="Phone" error={errors.guardianPhone} hint={<span aria-live="polite">{phoneHint(phone, lookupState)}</span>}>
                 {(p) => <input {...p} type="tel" inputMode="tel" className={inputClass} value={form.guardianPhone} onChange={set('guardianPhone')} autoComplete="off" />}
               </Field>
-              <Field label="Email (optional)" error={errors.guardianEmail}>
-                {(p) => <input {...p} type="email" className={inputClass} value={form.guardianEmail} onChange={set('guardianEmail')} autoComplete="off" />}
+              <Field label="Email (optional)" error={known ? undefined : errors.guardianEmail}>
+                {(p) => <input {...p} type="email" className={inputClass} value={form.guardianEmail} onChange={set('guardianEmail')} autoComplete="off" disabled={known} />}
               </Field>
-              <Field label="Address (optional)">
-                {(p) => <input {...p} className={inputClass} value={form.guardianAddress} onChange={set('guardianAddress')} autoComplete="off" />}
+              <Field label="Address" error={known ? undefined : errors.guardianAddress}>
+                {(p) => <input {...p} className={inputClass} value={form.guardianAddress} onChange={set('guardianAddress')} autoComplete="off" disabled={known} />}
               </Field>
             </div>
           </FormSection>
@@ -211,17 +306,12 @@ export default function RegisterNewborn() {
               What happens next
             </h2>
             <ol className="space-y-3 text-sm text-muted">
-              <li><span className="font-medium text-ink-2">1.</span> The guardian is saved, or reused if the phone number is known.</li>
+              <li><span className="font-medium text-ink-2">1.</span> The guardian is saved with a parent login, or reused if the phone number is known (a second child joins the same family and login).</li>
               <li><span className="font-medium text-ink-2">2.</span> 24 doses are scheduled from the date of birth (26 with JE).</li>
               <li><span className="font-medium text-ink-2">3.</span> Everything is saved together: if any step fails, nothing is kept.</li>
             </ol>
           </Card>
-          <Notice tone="info">
-            <span className="flex items-start gap-1.5">
-              <Info className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
-              Doses that are already past due are flagged as overdue when the dashboard opens.
-            </span>
-          </Notice>
+          <Notice tone="info">Doses that are already past due are flagged as overdue when the dashboard opens.</Notice>
         </aside>
       </div>
     </>

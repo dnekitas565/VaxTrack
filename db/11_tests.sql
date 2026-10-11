@@ -1,11 +1,11 @@
 -- ============================================================================
--- 11_tests.sql  --  automated test harness (20 cases) -> table test_log
+-- 11_tests.sql  --  automated test harness (31 cases) -> table test_log
 -- Owner  : vaxapp.  Run after 01..10 (TC-R1 reads the demo seed).
 -- Re-runnable: clears test_log, removes its own TEST_ data before every case
 --   and again at the end. Helper procedures tc_* are created here and dropped
 --   at the end. tc_log is AUTONOMOUS_TRANSACTION so a result survives the
 --   rollbacks that some cases deliberately trigger.
--- Test data: clinic TEST_CLINIC (isolated stock), babies TEST_*, guardian phones 90000000xx.
+-- Test data: clinic TEST_CLINIC (isolated stock), babies TEST_*, guardians named TEST_*, logins testu_*.
 -- ============================================================================
 SET DEFINE OFF
 SET SERVEROUTPUT ON SIZE UNLIMITED
@@ -52,7 +52,18 @@ BEGIN
   DELETE FROM vaccine_inventory
    WHERE clinic_id IN (SELECT clinic_id FROM clinics WHERE clinic_name = 'TEST_CLINIC');
   DELETE FROM newborns WHERE full_name LIKE 'TEST\_%' ESCAPE '\';
-  DELETE FROM guardians WHERE phone LIKE '90000000%';
+  -- accounts created by the account tests (parent logins are named after the guardian: test.guardian)
+  DELETE FROM app_users
+   WHERE username LIKE 'testu\_%' ESCAPE '\' OR username LIKE 'testu.%' OR username LIKE 'test.guardian%'
+      OR guardian_id IN (SELECT guardian_id FROM guardians WHERE full_name LIKE 'TEST\_%' ESCAPE '\');
+  DELETE FROM audit_log
+   WHERE table_name = 'APP_USERS'
+     AND (new_value LIKE 'username=testu\_%' ESCAPE '\' OR new_value LIKE 'username=testu.%'
+          OR new_value LIKE 'username=test.guardian%');
+  DELETE FROM audit_log
+   WHERE table_name = 'NEWBORNS'
+     AND (old_value LIKE 'name=TEST\_%' ESCAPE '\' OR new_value LIKE 'name=TEST\_%' ESCAPE '\');
+  DELETE FROM guardians WHERE full_name LIKE 'TEST\_%' ESCAPE '\';
   DELETE FROM clinics WHERE clinic_name = 'TEST_CLINIC';
   COMMIT;
 END tc_cleanup;
@@ -80,6 +91,14 @@ BEGIN
 END tc_user;
 /
 
+CREATE OR REPLACE FUNCTION tc_admin RETURN NUMBER IS
+  v_id app_users.user_id%TYPE;
+BEGIN
+  SELECT user_id INTO v_id FROM app_users WHERE username = 'admin';
+  RETURN v_id;
+END tc_admin;
+/
+
 CREATE OR REPLACE FUNCTION tc_vid (p_name VARCHAR2, p_dose NUMBER) RETURN NUMBER IS
   v_id vaccine_master.vaccine_id%TYPE;
 BEGIN
@@ -94,7 +113,7 @@ CREATE OR REPLACE FUNCTION tc_baby (
 ) RETURN NUMBER IS
   v_baby NUMBER;
 BEGIN
-  newborn_vaccination_pkg.register_newborn('TEST_Guardian', p_phone, NULL, NULL, p_name, 'F',
+  newborn_vaccination_pkg.register_newborn('TEST_Guardian', p_phone, NULL, 'TEST Street 1', p_name, 'F',
                                            TRUNC(SYSDATE) - p_days_old, 3.0, tc_clinic, p_je, v_baby);
   RETURN v_baby;
 END tc_baby;
@@ -246,7 +265,7 @@ BEGIN
   tc_cleanup;
   v_exp := '-20003|guardians=0|babies=0';
   BEGIN
-    newborn_vaccination_pkg.register_newborn('TEST_Guardian', '9000000031', NULL, NULL, 'TEST_P3', 'F',
+    newborn_vaccination_pkg.register_newborn('TEST_Guardian', '9000000031', NULL, 'TEST Street 1', 'TEST_P3', 'F',
                                              TRUNC(SYSDATE) + 5, 3.0, tc_clinic, 'N', v_baby);
     v_code := 'no error';
   EXCEPTION WHEN OTHERS THEN
@@ -573,6 +592,281 @@ EXCEPTION WHEN OTHERS THEN
 END;
 /
 
+-- ============================ ACCOUNTS ============================
+-- TC-U1 ------------------------------------------------------------
+DECLARE
+  v_baby NUMBER; v_user VARCHAR2(60); v_hash VARCHAR2(100); v_cnt NUMBER; v_role VARCHAR2(10);
+  v_exp VARCHAR2(200); v_act VARCHAR2(200);
+BEGIN
+  tc_cleanup;
+  v_exp := 'test.guardian|1|PARENT';
+  SELECT password_hash INTO v_hash FROM app_users WHERE username = 'parent1';
+  newborn_vaccination_pkg.register_newborn('TEST_Guardian', '9000000071', NULL, 'TEST Street 1', 'TEST_U1', 'F',
+                                           TRUNC(SYSDATE) - 5, 3.0, tc_clinic, 'N', v_baby, v_hash, v_user);
+  SELECT COUNT(*), MAX(role) INTO v_cnt, v_role
+    FROM app_users WHERE guardian_id = (SELECT guardian_id FROM newborns WHERE baby_id = v_baby);
+  v_act := v_user || '|' || v_cnt || '|' || v_role;
+  tc_log('TC-U1', 'register_newborn creates the guardian''s parent login (username from the guardian name)', v_exp, v_act);
+EXCEPTION WHEN OTHERS THEN
+  tc_log('TC-U1', 'register_newborn creates the guardian''s parent login (username from the guardian name)', v_exp, 'ERROR ' || SQLERRM);
+END;
+/
+
+-- TC-U2 ------------------------------------------------------------
+DECLARE
+  v_baby NUMBER; v_u1 VARCHAR2(60); v_u2 VARCHAR2(60); v_hash VARCHAR2(100); v_cnt NUMBER;
+  v_exp VARCHAR2(200); v_act VARCHAR2(200);
+BEGIN
+  tc_cleanup;
+  v_exp := 'test.guardian|none|logins=1';
+  SELECT password_hash INTO v_hash FROM app_users WHERE username = 'parent1';
+  newborn_vaccination_pkg.register_newborn('TEST_Guardian', '9000000072', NULL, 'TEST Street 1', 'TEST_U2A', 'F',
+                                           TRUNC(SYSDATE) - 5, 3.0, tc_clinic, 'N', v_baby, v_hash, v_u1);
+  newborn_vaccination_pkg.register_newborn('TEST_Guardian', '9000000072', NULL, 'TEST Street 1', 'TEST_U2B', 'M',
+                                           TRUNC(SYSDATE) - 3, 3.0, tc_clinic, 'N', v_baby, v_hash, v_u2);
+  SELECT COUNT(*) INTO v_cnt FROM app_users WHERE username LIKE 'test.guardian%';
+  v_act := v_u1 || '|' || NVL(v_u2, 'none') || '|logins=' || v_cnt;
+  tc_log('TC-U2', 'a second child of the same guardian does not create a second login', v_exp, v_act);
+EXCEPTION WHEN OTHERS THEN
+  tc_log('TC-U2', 'a second child of the same guardian does not create a second login', v_exp, 'ERROR ' || SQLERRM);
+END;
+/
+
+-- TC-U3 ------------------------------------------------------------
+DECLARE
+  v_hash VARCHAR2(100); v_uid NUMBER; v_clinic NUMBER; v_role VARCHAR2(10); v_dup VARCHAR2(20); v_free NUMBER;
+  v_exp VARCHAR2(200); v_act VARCHAR2(200);
+BEGIN
+  tc_cleanup;
+  v_exp := 'created NURSE at TEST_CLINIC|dup=-20018|next nurse name free=1';
+  SELECT password_hash INTO v_hash FROM app_users WHERE username = 'nurse1';
+  account_pkg.create_user(tc_user, 'testu_nurse', v_hash, 'NURSE', 'TEST Nurse', tc_clinic, NULL, v_uid);
+  SELECT role, clinic_id INTO v_role, v_clinic FROM app_users WHERE user_id = v_uid;
+  BEGIN
+    account_pkg.create_user(tc_user, 'TESTU_NURSE', v_hash, 'NURSE', 'TEST Nurse 2', tc_clinic, NULL, v_uid);
+    v_dup := 'no error';
+  EXCEPTION WHEN OTHERS THEN v_dup := TO_CHAR(SQLCODE); END;
+  SELECT CASE WHEN COUNT(*) = 0 THEN 1 ELSE 0 END INTO v_free FROM app_users WHERE username = account_pkg.next_nurse_username;
+  v_act := 'created ' || v_role || ' at ' || CASE WHEN v_clinic = tc_clinic THEN 'TEST_CLINIC' ELSE 'other clinic' END
+           || '|dup=' || v_dup || '|next nurse name free=' || v_free;
+  tc_log('TC-U3', 'create_user adds a nurse for a clinic; usernames are unique ignoring case', v_exp, v_act);
+EXCEPTION WHEN OTHERS THEN
+  tc_log('TC-U3', 'create_user adds a nurse for a clinic; usernames are unique ignoring case', v_exp, 'ERROR ' || SQLERRM);
+END;
+/
+
+-- TC-U4 ------------------------------------------------------------
+DECLARE
+  v_hash VARCHAR2(100); v_uid NUMBER; v_guardian NUMBER;
+  r1 VARCHAR2(20); r2 VARCHAR2(20); r3 VARCHAR2(20); r4 VARCHAR2(20);
+  v_exp VARCHAR2(200); v_act VARCHAR2(200);
+BEGIN
+  tc_cleanup;
+  v_exp := 'nurse-no-clinic=-20019|guardian-has-login=-20017|admin-role=-20019|bad-hash=-20019';
+  SELECT password_hash, guardian_id INTO v_hash, v_guardian FROM app_users WHERE username = 'parent1';
+  BEGIN account_pkg.create_user(tc_user, 'testu_x1', v_hash, 'NURSE', 'TEST X', NULL, NULL, v_uid); r1 := 'no error';
+  EXCEPTION WHEN OTHERS THEN r1 := TO_CHAR(SQLCODE); END;
+  BEGIN account_pkg.create_user(tc_user, 'testu_x2', v_hash, 'PARENT', 'TEST X', NULL, v_guardian, v_uid); r2 := 'no error';
+  EXCEPTION WHEN OTHERS THEN r2 := TO_CHAR(SQLCODE); END;
+  BEGIN account_pkg.create_user(tc_user, 'testu_x3', v_hash, 'ADMIN', 'TEST X', NULL, NULL, v_uid); r3 := 'no error';
+  EXCEPTION WHEN OTHERS THEN r3 := TO_CHAR(SQLCODE); END;
+  BEGIN account_pkg.create_user(tc_user, 'testu_x4', 'short', 'NURSE', 'TEST X', tc_clinic, NULL, v_uid); r4 := 'no error';
+  EXCEPTION WHEN OTHERS THEN r4 := TO_CHAR(SQLCODE); END;
+  v_act := 'nurse-no-clinic=' || r1 || '|guardian-has-login=' || r2 || '|admin-role=' || r3 || '|bad-hash=' || r4;
+  tc_log('TC-U4', 'account rules: nurse needs a clinic, one login per guardian, no admin via the app, valid hash', v_exp, v_act);
+EXCEPTION WHEN OTHERS THEN
+  tc_log('TC-U4', 'account rules: nurse needs a clinic, one login per guardian, no admin via the app, valid hash', v_exp, 'ERROR ' || SQLERRM);
+END;
+/
+
+-- TC-U5 ------------------------------------------------------------
+DECLARE
+  v_hash VARCHAR2(100); v_uid NUMBER; v_a VARCHAR2(60); v_b VARCHAR2(60); v_c VARCHAR2(60);
+  v_accent VARCHAR2(60); v_short VARCHAR2(60); v_len NUMBER;
+  v_exp VARCHAR2(200); v_act VARCHAR2(200);
+BEGIN
+  tc_cleanup;
+  v_exp := 'testu.zed|testu.zed2|testu.zed3|zoe.muller|parent|len=34';
+  SELECT password_hash INTO v_hash FROM app_users WHERE username = 'nurse1';
+  v_a := account_pkg.suggest_username('Testu Zed');
+  account_pkg.create_user(tc_user, v_a, v_hash, 'NURSE', 'TEST Nurse A', tc_clinic, NULL, v_uid);
+  v_b := account_pkg.suggest_username('TESTU  ZED');          -- same name, other case and spacing
+  account_pkg.create_user(tc_user, v_b, v_hash, 'NURSE', 'TEST Nurse B', tc_clinic, NULL, v_uid);
+  v_c := account_pkg.suggest_username('testu zed');
+  v_accent := account_pkg.suggest_username(UNISTR('Zo\00EB M\00FCller'));   -- Zoe Muller with accents
+  v_short := account_pkg.suggest_username('Li');                           -- too short to be a name
+  v_len := LENGTH(account_pkg.suggest_username(RPAD('abc ', 120, 'x')));
+  v_act := v_a || '|' || v_b || '|' || v_c || '|' || v_accent || '|' || v_short || '|len=' || v_len;
+  tc_log('TC-U5', 'suggest_username: name-based, numbered when taken, accents folded, short names and length handled', v_exp, v_act);
+EXCEPTION WHEN OTHERS THEN
+  tc_log('TC-U5', 'suggest_username: name-based, numbered when taken, accents folded, short names and length handled', v_exp, 'ERROR ' || SQLERRM);
+END;
+/
+
+-- TC-U6 ------------------------------------------------------------
+DECLARE
+  v_baby NUMBER; v_user VARCHAR2(60); v_hash VARCHAR2(100);
+  v_known VARCHAR2(1); v_padded VARCHAR2(1); v_unknown VARCHAR2(1); v_before VARCHAR2(1);
+  v_exp VARCHAR2(200); v_act VARCHAR2(200);
+BEGIN
+  tc_cleanup;
+  v_exp := 'before=N|known=Y|padded=Y|other=N';
+  SELECT password_hash INTO v_hash FROM app_users WHERE username = 'parent1';
+  v_before := newborn_vaccination_pkg.guardian_exists('9000000091');
+  newborn_vaccination_pkg.register_newborn('TEST_Guardian', '9000000091', NULL, 'TEST Street 1', 'TEST_U6', 'F',
+                                           TRUNC(SYSDATE) - 5, 3.0, tc_clinic, 'N', v_baby, v_hash, v_user);
+  v_known   := newborn_vaccination_pkg.guardian_exists('9000000091');
+  v_padded  := newborn_vaccination_pkg.guardian_exists('  9000000091 ');
+  v_unknown := newborn_vaccination_pkg.guardian_exists('9000000092');
+  v_act := 'before=' || v_before || '|known=' || v_known || '|padded=' || v_padded || '|other=' || v_unknown;
+  tc_log('TC-U6', 'guardian_exists answers Y/N for a phone number (same matching as register_newborn)', v_exp, v_act);
+EXCEPTION WHEN OTHERS THEN
+  tc_log('TC-U6', 'guardian_exists answers Y/N for a phone number (same matching as register_newborn)', v_exp, 'ERROR ' || SQLERRM);
+END;
+/
+
+-- TC-U7 ------------------------------------------------------------
+DECLARE
+  v_baby NUMBER; v_u1 VARCHAR2(60); v_u2 VARCHAR2(60); v_hash VARCHAR2(100); v_babies NUMBER; v_logins NUMBER;
+  v_gname VARCHAR2(100); v_new VARCHAR2(20); v_sib VARCHAR2(80); v_noaddr VARCHAR2(20);
+  v_exp VARCHAR2(200); v_act VARCHAR2(200);
+BEGIN
+  tc_cleanup;
+  v_exp := 'sibling: no login, babies=2, logins=1, name kept=TEST_Guardian|new guardian without name=-20014|without address=-20014';
+  SELECT password_hash INTO v_hash FROM app_users WHERE username = 'parent1';
+  newborn_vaccination_pkg.register_newborn('TEST_Guardian', '9000000093', NULL, 'TEST Street 1', 'TEST_U7A', 'F',
+                                           TRUNC(SYSDATE) - 5, 3.0, tc_clinic, 'N', v_baby, v_hash, v_u1);
+  -- the sibling is registered with no guardian name at all: the known guardian is reused
+  newborn_vaccination_pkg.register_newborn(NULL, '9000000093', NULL, NULL, 'TEST_U7B', 'M',
+                                           TRUNC(SYSDATE) - 3, 3.0, tc_clinic, 'N', v_baby, v_hash, v_u2);
+  v_sib := CASE WHEN v_u2 IS NULL THEN 'no login' ELSE 'login ' || v_u2 END;
+  SELECT COUNT(*) INTO v_babies FROM newborns n JOIN guardians g ON g.guardian_id = n.guardian_id WHERE g.phone = '9000000093';
+  SELECT COUNT(*) INTO v_logins FROM app_users u JOIN guardians g ON g.guardian_id = u.guardian_id WHERE g.phone = '9000000093';
+  SELECT full_name INTO v_gname FROM guardians WHERE phone = '9000000093';
+  BEGIN
+    newborn_vaccination_pkg.register_newborn(NULL, '9000000094', NULL, NULL, 'TEST_U7C', 'F',
+                                             TRUNC(SYSDATE) - 3, 3.0, tc_clinic, 'N', v_baby, v_hash, v_u2);
+    v_new := 'no error';
+  EXCEPTION WHEN OTHERS THEN v_new := TO_CHAR(SQLCODE); END;
+  BEGIN
+    newborn_vaccination_pkg.register_newborn('TEST_Guardian', '9000000095', NULL, NULL, 'TEST_U7D', 'F',
+                                             TRUNC(SYSDATE) - 3, 3.0, tc_clinic, 'N', v_baby, v_hash, v_u2);
+    v_noaddr := 'no error';
+  EXCEPTION WHEN OTHERS THEN v_noaddr := TO_CHAR(SQLCODE); END;
+  v_act := 'sibling: ' || v_sib
+           || ', babies=' || v_babies || ', logins=' || v_logins || ', name kept=' || v_gname
+           || '|new guardian without name=' || v_new || '|without address=' || v_noaddr;
+  tc_log('TC-U7', 'a sibling joins the existing guardian and login; a new guardian still needs a name and an address', v_exp, v_act);
+EXCEPTION WHEN OTHERS THEN
+  tc_log('TC-U7', 'a sibling joins the existing guardian and login; a new guardian still needs a name and an address', v_exp, 'ERROR ' || SQLERRM);
+END;
+/
+
+-- ============================ ADMIN: EDIT / DELETE NEWBORN ============================
+-- TC-N1 ------------------------------------------------------------
+DECLARE
+  v_baby NUMBER; v_bcg NUMBER; v_opv NUMBER; v_late CHAR(1); v_sched DATE; v_status VARCHAR2(10);
+  v_dob DATE; v_name VARCHAR2(100); v_exp VARCHAR2(300); v_act VARCHAR2(300);
+BEGIN
+  tc_cleanup;
+  v_exp := 'late=N|bOPV-1 due +32|PENDING|dob moved|name=TEST_N1_new';
+  v_baby := tc_baby('TEST_N1', 60, '9000000181');
+  tc_stock('BCG', 1, 'TEST-N1', 100, 5);
+  v_bcg := tc_rec(v_baby, 'BCG', 1);
+  newborn_vaccination_pkg.mark_dose_administered(v_bcg, NULL, tc_clinic, tc_user);          -- age 60: late
+  newborn_vaccination_pkg.update_newborn(v_baby, 'TEST_N1_new', 'M', TRUNC(SYSDATE) - 10, 3.4, tc_admin);
+  SELECT is_late INTO v_late FROM dose_records WHERE record_id = v_bcg;                     -- age 10 now: not late
+  v_opv := tc_rec(v_baby, 'bOPV', 1);
+  SELECT scheduled_date, status INTO v_sched, v_status FROM dose_records WHERE record_id = v_opv;
+  SELECT date_of_birth, full_name INTO v_dob, v_name FROM newborns WHERE baby_id = v_baby;
+  v_act := 'late=' || v_late || '|bOPV-1 due +' || (v_sched - TRUNC(SYSDATE)) || '|' || v_status || '|'
+           || CASE WHEN v_dob = TRUNC(SYSDATE) - 10 THEN 'dob moved' ELSE 'dob NOT moved' END || '|name=' || v_name;
+  tc_log('TC-N1', 'update_newborn moves unfinished dose dates with the date of birth and recalculates late flags', v_exp, v_act);
+EXCEPTION WHEN OTHERS THEN
+  tc_log('TC-N1', 'update_newborn moves unfinished dose dates with the date of birth and recalculates late flags', v_exp, 'ERROR ' || SQLERRM);
+END;
+/
+
+-- TC-N2 ------------------------------------------------------------
+DECLARE
+  v_baby NUMBER; v_baby2 NUMBER; v_dob DATE; r1 VARCHAR2(20); r2 VARCHAR2(20); v_exp VARCHAR2(300); v_act VARCHAR2(300);
+BEGIN
+  tc_cleanup;
+  v_exp := '-20020|dob unchanged|-20003';
+  v_baby := tc_baby('TEST_N2', 60, '9000000182');
+  tc_stock('bOPV', 1, 'TEST-N2', 100, 5);
+  newborn_vaccination_pkg.mark_dose_administered(tc_rec(v_baby, 'bOPV', 1), NULL, tc_clinic, tc_user);   -- given at age 60
+  BEGIN
+    newborn_vaccination_pkg.update_newborn(v_baby, 'TEST_N2', 'F', TRUNC(SYSDATE) - 30, 3.0, tc_admin);   -- would be age 30 < 42
+    r1 := 'no error';
+  EXCEPTION WHEN OTHERS THEN r1 := TO_CHAR(SQLCODE); END;
+  SELECT date_of_birth INTO v_dob FROM newborns WHERE baby_id = v_baby;
+  v_baby2 := tc_baby('TEST_N2B', 5, '9000000186');
+  BEGIN
+    newborn_vaccination_pkg.update_newborn(v_baby2, 'TEST_N2B', 'F', TRUNC(SYSDATE) + 3, 3.0, tc_admin);
+    r2 := 'no error';
+  EXCEPTION WHEN OTHERS THEN r2 := TO_CHAR(SQLCODE); END;
+  v_act := r1 || '|' || CASE WHEN v_dob = TRUNC(SYSDATE) - 60 THEN 'dob unchanged' ELSE 'dob CHANGED' END || '|' || r2;
+  tc_log('TC-N2', 'a date of birth that invalidates a given dose, or lies in the future, is refused', v_exp, v_act);
+EXCEPTION WHEN OTHERS THEN
+  tc_log('TC-N2', 'a date of birth that invalidates a given dose, or lies in the future, is refused', v_exp, 'ERROR ' || SQLERRM);
+END;
+/
+
+-- TC-N3 ------------------------------------------------------------
+DECLARE
+  TYPE t_ids IS TABLE OF NUMBER INDEX BY PLS_INTEGER;
+  v_ids t_ids; v_a NUMBER; v_b NUMBER; q1 NUMBER; q2 NUMBER; v_left NUMBER; v_audit NUMBER;
+  v_exp VARCHAR2(300); v_act VARCHAR2(300);
+BEGIN
+  tc_cleanup;
+  v_exp := 'restored=5|kept=4|left=0|audit=2';
+  v_a := tc_baby('TEST_N3A', 20, '9000000183');
+  v_b := tc_baby('TEST_N3B', 20, '9000000184');
+  tc_stock('BCG', 1, 'TEST-N3', 100, 5);
+  SELECT record_id BULK COLLECT INTO v_ids FROM dose_records WHERE baby_id IN (v_a, v_b);
+  newborn_vaccination_pkg.mark_dose_administered(tc_rec(v_a, 'BCG', 1), NULL, tc_clinic, tc_user);       -- 5 -> 4
+  newborn_vaccination_pkg.delete_newborn(v_a, tc_admin, 'Y');                                            -- back to 5
+  q1 := tc_stock_qty('TEST-N3');
+  newborn_vaccination_pkg.mark_dose_administered(tc_rec(v_b, 'BCG', 1), NULL, tc_clinic, tc_user);       -- 5 -> 4
+  newborn_vaccination_pkg.delete_newborn(v_b, tc_admin, 'N');                                            -- stays 4
+  q2 := tc_stock_qty('TEST-N3');
+  SELECT (SELECT COUNT(*) FROM newborns WHERE baby_id IN (v_a, v_b))
+       + (SELECT COUNT(*) FROM dose_records WHERE baby_id IN (v_a, v_b))
+       + (SELECT COUNT(*) FROM alerts WHERE baby_id IN (v_a, v_b)) INTO v_left FROM dual;
+  SELECT COUNT(*) INTO v_audit FROM audit_log WHERE table_name = 'NEWBORNS' AND action = 'DELETE' AND record_id IN (v_a, v_b);
+  FORALL i IN 1 .. v_ids.COUNT DELETE FROM audit_log WHERE table_name = 'DOSE_RECORDS' AND record_id = v_ids(i);
+  COMMIT;
+  v_act := 'restored=' || q1 || '|kept=' || q2 || '|left=' || v_left || '|audit=' || v_audit;
+  tc_log('TC-N3', 'delete_newborn removes the baby, doses and alerts; stock comes back only when asked', v_exp, v_act);
+EXCEPTION WHEN OTHERS THEN
+  tc_log('TC-N3', 'delete_newborn removes the baby, doses and alerts; stock comes back only when asked', v_exp, 'ERROR ' || SQLERRM);
+END;
+/
+
+-- TC-N4 ------------------------------------------------------------
+DECLARE
+  v_baby NUMBER; r1 VARCHAR2(20); r2 VARCHAR2(20); v_intact NUMBER; v_audit NUMBER; v_exp VARCHAR2(300); v_act VARCHAR2(300);
+BEGIN
+  tc_cleanup;
+  v_exp := 'update=-20021|delete=-20021|intact=1|audit by admin=1';
+  v_baby := tc_baby('TEST_N4', 5, '9000000185');
+  BEGIN newborn_vaccination_pkg.update_newborn(v_baby, 'TEST_N4', 'F', TRUNC(SYSDATE) - 5, 3.0, tc_user); r1 := 'no error';
+  EXCEPTION WHEN OTHERS THEN r1 := TO_CHAR(SQLCODE); END;
+  BEGIN newborn_vaccination_pkg.delete_newborn(v_baby, tc_user, 'N'); r2 := 'no error';
+  EXCEPTION WHEN OTHERS THEN r2 := TO_CHAR(SQLCODE); END;
+  SELECT COUNT(*) INTO v_intact FROM newborns WHERE baby_id = v_baby;
+  newborn_vaccination_pkg.update_newborn(v_baby, 'TEST_N4_ok', 'F', TRUNC(SYSDATE) - 5, 3.0, tc_admin);
+  SELECT COUNT(*) INTO v_audit FROM audit_log
+   WHERE table_name = 'NEWBORNS' AND record_id = v_baby AND action = 'UPDATE'
+     AND new_value LIKE 'name=TEST_N4_ok%' AND changed_by LIKE 'admin%';
+  v_act := 'update=' || r1 || '|delete=' || r2 || '|intact=' || v_intact || '|audit by admin=' || v_audit;
+  tc_log('TC-N4', 'only an administrator can edit or delete a newborn; the change is audited with the actor', v_exp, v_act);
+EXCEPTION WHEN OTHERS THEN
+  tc_log('TC-N4', 'only an administrator can edit or delete a newborn; the change is audited with the actor', v_exp, 'ERROR ' || SQLERRM);
+END;
+/
+
 -- ============================ REPORTING ============================
 -- TC-R1 ------------------------------------------------------------
 DECLARE
@@ -636,6 +930,7 @@ DROP PROCEDURE tc_log;
 DROP PROCEDURE tc_cleanup;
 DROP FUNCTION tc_clinic;
 DROP FUNCTION tc_user;
+DROP FUNCTION tc_admin;
 DROP FUNCTION tc_vid;
 DROP FUNCTION tc_baby;
 DROP PROCEDURE tc_stock;
@@ -656,6 +951,9 @@ PROMPT
 SELECT result, COUNT(*) AS cases FROM test_log GROUP BY result ORDER BY result;
 SELECT 'leftover TEST_ rows (must be 0): '
        || ((SELECT COUNT(*) FROM newborns WHERE full_name LIKE 'TEST\_%' ESCAPE '\')
-         + (SELECT COUNT(*) FROM clinics WHERE clinic_name = 'TEST_CLINIC')) AS info
+         + (SELECT COUNT(*) FROM clinics WHERE clinic_name = 'TEST_CLINIC')
+         + (SELECT COUNT(*) FROM guardians WHERE full_name LIKE 'TEST\_%' ESCAPE '\')
+         + (SELECT COUNT(*) FROM app_users WHERE username LIKE 'testu\_%' ESCAPE '\' OR username LIKE 'testu.%'
+                                        OR username LIKE 'test.guardian%')) AS info
   FROM dual;
 PROMPT 11_tests.sql complete.
